@@ -29,13 +29,98 @@ try:
 except ImportError:
     OPENROUTER_AVAILABLE = False
 
+class SystemInstructionsManager:
+    """Class to manage system instructions for AI models"""
+    def __init__(self, logger, console):
+        self.logger = logger
+        self.console = console
+        self.instructions_file = os.path.join(os.path.dirname(__file__), 'system_instructions.json')
+        self.instructions = self._load_instructions()
+
+    def _load_instructions(self):
+        """Load system instructions from file"""
+        try:
+            if os.path.exists(self.instructions_file):
+                with open(self.instructions_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {
+                'instructions': [
+                    {
+                        'name': 'Default',
+                        'content': 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.'
+                    }
+                ],
+                'selected': 'Default'
+            }
+        except Exception as e:
+            self.logger.error(f"Error loading instructions: {e}")
+            return {'instructions': [], 'selected': None}
+
+    def _save_instructions(self):
+        """Save system instructions to file"""
+        try:
+            with open(self.instructions_file, 'w', encoding='utf-8') as f:
+                json.dump(self.instructions, f, indent=4)
+        except Exception as e:
+            self.logger.error(f"Error saving instructions: {e}")
+
+    def add_instruction(self, name, content):
+        """Add a new system instruction"""
+        if any(i['name'] == name for i in self.instructions['instructions']):
+            return False, "Instruction with this name already exists"
+        
+        self.instructions['instructions'].append({
+            'name': name,
+            'content': content
+        })
+        self._save_instructions()
+        return True, "Instruction added successfully"
+
+    def remove_instruction(self, name):
+        """Remove a system instruction"""
+        if name == 'Default':
+            return False, "Cannot remove default instruction"
+        
+        self.instructions['instructions'] = [
+            i for i in self.instructions['instructions'] if i['name'] != name
+        ]
+        if self.instructions['selected'] == name:
+            self.instructions['selected'] = 'Default'
+        self._save_instructions()
+        return True, "Instruction removed successfully"
+
+    def select_instruction(self, name):
+        """Select a system instruction as active"""
+        if any(i['name'] == name for i in self.instructions['instructions']):
+            self.instructions['selected'] = name
+            self._save_instructions()
+            return True, "Instruction selected successfully"
+        return False, "Instruction not found"
+
+    def get_selected_instruction(self):
+        """Get the currently selected instruction content"""
+        selected = self.instructions['selected']
+        for instruction in self.instructions['instructions']:
+            if instruction['name'] == selected:
+                return instruction['content']
+        # Return default if nothing is selected
+        return "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
+
+    def list_instructions(self):
+        """List all available instructions"""
+        return self.instructions['instructions']
+
+    def get_current_name(self):
+        """Get the name of the currently selected instruction"""
+        return self.instructions['selected']
+
 # Add HTTP headers helper
 def get_openrouter_headers(api_key):
     """Get required headers for OpenRouter API"""
     return {
         "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": "https://github.com/cursor-ai",  # Replace with your actual site
-        "X-Title": "AI Chat Script",  # Replace with your app name
+        "HTTP-Referer": "https://github.com/eplisium",  # Replace with your actual site
+        "X-Title": "AI Chat Terminal",  # Replace with your app name
         "Content-Type": "application/json"
     }
 
@@ -150,7 +235,7 @@ class OpenRouterAPI:
         return dict(company_models)
 
 class AIChat:
-    def __init__(self, model_config, logger, console):
+    def __init__(self, model_config, logger, console, system_instruction=None):
         """
         Initialize AI Chat with specific model configuration
         
@@ -158,6 +243,7 @@ class AIChat:
             model_config (dict): Configuration for the selected model
             logger (logging.Logger): Logging instance
             console (rich.console.Console): Rich console for output
+            system_instruction (str, optional): System instruction to use. Defaults to None.
         """
         self.logger = logger
         self.console = console
@@ -175,8 +261,7 @@ class AIChat:
         self.messages = [
             {
                 "role": "system", 
-                "content": f"You are {self.model_name}, an advanced AI assistant. "
-                           "Provide clear, concise, and helpful responses."
+                "content": system_instruction or "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
             }
         ]
         
@@ -871,6 +956,9 @@ class AIChatApp:
         self.logger = logger
         self.console = console
         
+        # Initialize system instructions manager
+        self.instructions_manager = SystemInstructionsManager(logger, console)
+        
         # Load models from JSON
         try:
             models_path = os.path.join(os.path.dirname(__file__), 'models.json')
@@ -1089,6 +1177,130 @@ class AIChatApp:
             self.console.print(f"[bold red]Error in OpenRouter model selection: {e}[/bold red]")
             return None
     
+    def manage_instructions(self):
+        """Display system instructions management menu"""
+        while True:
+            # Get current instructions
+            current_name = self.instructions_manager.get_current_name()
+            instructions = self.instructions_manager.list_instructions()
+            
+            # Create choices for instructions menu
+            choices = [
+                ("=== System Instructions ===", None),
+                (f"Currently Selected: {current_name}", None),
+                ("Add New Instruction", "add"),
+                ("Select Instruction", "select"),
+                ("Remove Instruction", "remove"),
+                ("View Instructions", "view"),
+                ("Back to Main Menu", "back")
+            ]
+            
+            questions = [
+                inquirer.List('action',
+                    message="Manage System Instructions",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+            
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+            
+            if answer['action'] == "add":
+                # Prompt for new instruction details
+                questions = [
+                    inquirer.Text('name',
+                        message="Enter instruction name",
+                        validate=lambda _, x: len(x) > 0
+                    ),
+                    inquirer.Text('content',
+                        message="Enter instruction content",
+                        validate=lambda _, x: len(x) > 0
+                    )
+                ]
+                
+                new_instruction = inquirer.prompt(questions)
+                if new_instruction:
+                    success, msg = self.instructions_manager.add_instruction(
+                        new_instruction['name'],
+                        new_instruction['content']
+                    )
+                    self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+            
+            elif answer['action'] == "select":
+                if not instructions:
+                    self.console.print("[yellow]No instructions available[/yellow]")
+                    continue
+                
+                # Create choices for instruction selection
+                instruction_choices = [
+                    (f"{i['name']}", i['name']) for i in instructions
+                ]
+                instruction_choices.append(("Back", None))
+                
+                select_question = [
+                    inquirer.List('instruction',
+                        message="Select Instruction",
+                        choices=instruction_choices,
+                        carousel=True
+                    ),
+                ]
+                
+                select_answer = inquirer.prompt(select_question)
+                if select_answer and select_answer['instruction']:
+                    success, msg = self.instructions_manager.select_instruction(
+                        select_answer['instruction']
+                    )
+                    self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+            
+            elif answer['action'] == "remove":
+                if not instructions:
+                    self.console.print("[yellow]No instructions available[/yellow]")
+                    continue
+                
+                # Create choices for instruction removal
+                instruction_choices = [
+                    (f"{i['name']}", i['name']) 
+                    for i in instructions 
+                    if i['name'] != 'Default'  # Prevent removal of default instruction
+                ]
+                instruction_choices.append(("Back", None))
+                
+                remove_question = [
+                    inquirer.List('instruction',
+                        message="Select Instruction to Remove",
+                        choices=instruction_choices,
+                        carousel=True
+                    ),
+                ]
+                
+                remove_answer = inquirer.prompt(remove_question)
+                if remove_answer and remove_answer['instruction']:
+                    success, msg = self.instructions_manager.remove_instruction(
+                        remove_answer['instruction']
+                    )
+                    self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+            
+            elif answer['action'] == "view":
+                if not instructions:
+                    self.console.print("[yellow]No instructions available[/yellow]")
+                    continue
+                
+                # Display all instructions
+                for instruction in instructions:
+                    is_selected = instruction['name'] == current_name
+                    self.console.print(
+                        Panel(
+                            f"[bold]Content:[/bold]\n{instruction['content']}",
+                            title=f"[{'green' if is_selected else 'white'}]{instruction['name']}{'  [Selected]' if is_selected else ''}[/]",
+                            border_style="green" if is_selected else "white"
+                        )
+                    )
+                
+                # Wait for user acknowledgment
+                self.console.input("\nPress Enter to continue...")
+
     def display_main_menu(self):
         """
         Display the main menu for model selection
@@ -1114,6 +1326,7 @@ class AIChatApp:
                     ("⭐ Favorite Models", "favorites"),
                     ("OpenAI Models", "openai"),
                     ("OpenRouter Models", "openrouter"),
+                    ("⚙️ System Instructions", "instructions"),
                     ("Exit Application", "exit")
                 ]
                 
@@ -1139,10 +1352,13 @@ class AIChatApp:
                 
                 selected_provider = answer['provider']
 
-                if selected_provider == "favorites":
+                if selected_provider == "instructions":
+                    self.manage_instructions()
+                    continue
+                elif selected_provider == "favorites":
                     self.manage_favorites()
                     continue
-                
+
                 # Handle provider selection
                 if selected_provider == "openai":
                     # Filter and display OpenAI models
@@ -1239,8 +1455,11 @@ class AIChatApp:
             model_config (dict): Configuration for the selected model
         """
         try:
+            # Get the current system instruction
+            system_instruction = self.instructions_manager.get_selected_instruction()
+            
             # Initialize and start chat with selected model
-            chat = AIChat(model_config, self.logger, self.console)
+            chat = AIChat(model_config, self.logger, self.console, system_instruction)
             chat.chat_loop()
         except Exception as e:
             self.logger.error(f"Error starting chat: {e}", exc_info=True)
