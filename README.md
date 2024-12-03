@@ -22,8 +22,8 @@ A versatile command-line chat interface that supports multiple AI providers incl
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ai-chat-script.git
-cd ai-chat-script
+git clone https://github.com/eplisium/ai-chat-terminal.git
+cd ai-chat-terminal
 ```
 
 2. Create a virtual environment and activate it:
