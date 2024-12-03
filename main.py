@@ -157,6 +157,32 @@ def setup_logging():
 
     return logging.getLogger("AIChat"), console
 
+def sanitize_path(path):
+    """
+    Sanitize a path string to be valid on all operating systems
+    
+    Args:
+        path (str): The path to sanitize
+    
+    Returns:
+        str: The sanitized path
+    """
+    # Characters not allowed in file/directory names on most systems
+    invalid_chars = '<>:"/\\|?*'
+    
+    # Replace invalid characters with underscores
+    for char in invalid_chars:
+        path = path.replace(char, '_')
+    
+    # Remove any leading/trailing periods or spaces
+    path = path.strip('. ')
+    
+    # Ensure the path isn't empty after sanitization
+    if not path:
+        path = 'unnamed'
+    
+    return path
+
 class OpenRouterAPI:
     """Class to handle OpenRouter API interactions"""
     def __init__(self, api_key):
@@ -395,10 +421,13 @@ class AIChat:
             if self.provider == 'openrouter':
                 # For OpenRouter, create company/model subdirectories
                 company, model_name = self.model_id.split('/')
+                # Sanitize paths
+                company = sanitize_path(company)
+                model_name = sanitize_path(model_name)
                 chat_dir = os.path.join(chats_dir, 'openrouter', company, model_name)
             else:
                 # For other providers (e.g., OpenAI), just use provider name
-                chat_dir = os.path.join(chats_dir, self.provider)
+                chat_dir = os.path.join(chats_dir, sanitize_path(self.provider))
 
             os.makedirs(chat_dir, exist_ok=True)
 
