@@ -1208,25 +1208,81 @@ class AIChatApp:
                 break
             
             if answer['action'] == "add":
-                # Prompt for new instruction details
-                questions = [
+                # Get instruction name first
+                name_question = [
                     inquirer.Text('name',
                         message="Enter instruction name",
-                        validate=lambda _, x: len(x) > 0
-                    ),
-                    inquirer.Text('content',
-                        message="Enter instruction content",
                         validate=lambda _, x: len(x) > 0
                     )
                 ]
                 
-                new_instruction = inquirer.prompt(questions)
-                if new_instruction:
-                    success, msg = self.instructions_manager.add_instruction(
-                        new_instruction['name'],
-                        new_instruction['content']
+                name_answer = inquirer.prompt(name_question)
+                if not name_answer:
+                    continue
+                
+                # Clear screen for better visibility
+                os.system('cls' if os.name == 'nt' else 'clear')
+                
+                # Show instructions for multiline input
+                self.console.print(
+                    Panel(
+                        "[bold cyan]Enter your system instruction below:[/bold cyan]\n"
+                        "• You can paste multiple lines of text\n"
+                        "• Press [bold]Enter[/bold] twice to start a new line\n"
+                        "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                        "• Type [bold]CANCEL[/bold] on a new line to cancel",
+                        title="[bold white]Instruction Input[/bold white]",
+                        border_style="cyan"
                     )
-                    self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+                )
+                
+                # Collect multiline input
+                content_lines = []
+                try:
+                    while True:
+                        line = input()
+                        if line.strip().upper() == 'END':
+                            break
+                        if line.strip().upper() == 'CANCEL':
+                            content_lines = []
+                            break
+                        content_lines.append(line)
+                except KeyboardInterrupt:
+                    self.console.print("\n[yellow]Input cancelled[/yellow]")
+                    continue
+                
+                # Process the input
+                if content_lines:
+                    content = '\n'.join(content_lines)
+                    
+                    # Show preview
+                    self.console.print("\n[bold cyan]Preview of your instruction:[/bold cyan]")
+                    self.console.print(
+                        Panel(
+                            content,
+                            title=f"[bold white]{name_answer['name']}[/bold white]",
+                            border_style="cyan"
+                        )
+                    )
+                    
+                    # Confirm save
+                    confirm_question = [
+                        inquirer.Confirm('save',
+                            message="Save this instruction?",
+                            default=True
+                        )
+                    ]
+                    
+                    if inquirer.prompt(confirm_question)['save']:
+                        success, msg = self.instructions_manager.add_instruction(
+                            name_answer['name'],
+                            content
+                        )
+                        self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+                    else:
+                        self.console.print("[yellow]Instruction not saved[/yellow]")
+                else:
+                    self.console.print("[yellow]No content provided, instruction not saved[/yellow]")
             
             elif answer['action'] == "select":
                 if not instructions:
