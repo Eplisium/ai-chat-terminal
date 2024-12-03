@@ -1,0 +1,60 @@
+{
+    "models": [
+        {
+            "name": "GPT-4o-Mini",
+            "id": "gpt-4o-mini",
+            "description": "Affordable and intelligent small model for fast, lightweight tasks.",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "GPT-4o",
+            "id": "gpt-4o",
+            "description": "High-intelligence flagship model for complex, multi-step tasks.",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "ChatGPT-4o",
+            "id": "chatgpt-4o-latest",
+            "description": "Model version continuously points to the version of GPT-4o used in ChatGPT",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "Claude 3 Haiku",
+            "id": "anthropic/claude-3-haiku",
+            "description": "Anthropic's lightweight and fast model for quick tasks.",
+            "context_window": 200000,
+            "provider": "openrouter"
+        },
+        {
+            "name": "Claude 3 Sonnet",
+            "id": "anthropic/claude-3-sonnet",
+            "description": "Balanced intelligence model with strong performance.",
+            "context_window": 200000,
+            "provider": "openrouter"
+        },
+        {
+            "name": "Mixtral 8x7B",
+            "id": "mistralai/mixtral-8x7b",
+            "description": "High-performance open-source language model.",
+            "context_window": 32000,
+            "provider": "openrouter"
+        },
+        {
+            "name": "Gemini Pro",
+            "id": "google/gemini-pro",
+            "description": "Google's powerful language model.",
+            "context_window": 30720,
+            "provider": "openrouter"
+        },
+        {
+            "name": "GPT-3.5 Turbo",
+            "id": "openai/gpt-3.5-turbo",
+            "description": "Capable and cost-effective model for various tasks.",
+            "context_window": 16385,
+            "provider": "openrouter"
+        }
+    ]
+}
