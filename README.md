@@ -1,4 +1,4 @@
-# AI Chat Script
+# ACT (AI Chat Terminal)
 
 A versatile command-line chat interface that supports multiple AI providers including OpenAI and OpenRouter.
 

@@ -120,7 +120,7 @@ def get_openrouter_headers(api_key):
     return {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://github.com/eplisium",  # Replace with your actual site
-        "X-Title": "AI Chat Terminal",  # Replace with your app name
+        "X-Title": "ACT",  # Replace with your app name
         "Content-Type": "application/json"
     }
 
