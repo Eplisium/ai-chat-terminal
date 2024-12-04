@@ -16,6 +16,32 @@ import requests
 from collections import defaultdict
 from rich.syntax import Syntax
 
+# Document handling imports
+try:
+    import docx
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
+try:
+    from PyPDF2 import PdfReader
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+try:
+    import odf
+    from odf import text, teletype
+    ODF_AVAILABLE = True
+except ImportError:
+    ODF_AVAILABLE = False
+
+try:
+    import rtf
+    RTF_AVAILABLE = True
+except ImportError:
+    RTF_AVAILABLE = False
+
 # Conditionally import based on provider
 try:
     from openai import OpenAI
@@ -259,6 +285,68 @@ class OpenRouterAPI:
             )
         
         return dict(company_models)
+
+def read_document_content(file_path):
+    """
+    Read content from various document formats
+    
+    Args:
+        file_path (str): Path to the document file
+    
+    Returns:
+        tuple: (success, content or error message)
+    """
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    try:
+        # Handle DOCX files
+        if file_ext == '.docx':
+            if not DOCX_AVAILABLE:
+                return False, "python-docx library not installed. Install with: pip install python-docx"
+            doc = docx.Document(file_path)
+            content = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+            return True, content
+
+        # Handle PDF files
+        elif file_ext == '.pdf':
+            if not PDF_AVAILABLE:
+                return False, "PyPDF2 library not installed. Install with: pip install PyPDF2"
+            reader = PdfReader(file_path)
+            content = '\n'.join([page.extract_text() for page in reader.pages])
+            return True, content
+
+        # Handle ODT files
+        elif file_ext == '.odt':
+            if not ODF_AVAILABLE:
+                return False, "odfpy library not installed. Install with: pip install odfpy"
+            doc = odf.load(file_path)
+            content = teletype.extractText(doc)
+            return True, content
+
+        # Handle RTF files
+        elif file_ext == '.rtf':
+            if not RTF_AVAILABLE:
+                return False, "pyth library not installed. Install with: pip install pyth"
+            with open(file_path, 'rb') as f:
+                doc = rtf.Rtf(f)
+                content = doc.getText()
+                return True, content
+
+        # Handle text files with different encodings
+        else:
+            encodings = ['utf-8', 'latin1', 'cp1252', 'ascii']
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        return True, content
+                except UnicodeDecodeError:
+                    continue
+            
+            return False, f"Could not decode file with any of the following encodings: {', '.join(encodings)}"
+
+    except Exception as e:
+        return False, str(e)
 
 class AIChat:
     def __init__(self, model_config, logger, console, system_instruction=None):
@@ -751,18 +839,19 @@ class AIChat:
                                     for path in possible_paths:
                                         if os.path.isfile(path):
                                             try:
-                                                # Read file contents
-                                                with open(path, 'r', encoding='utf-8') as f:
-                                                    file_content = f.read()
-                                                
                                                 # Get file extension for syntax highlighting
                                                 ext = os.path.splitext(path)[1][1:] or 'text'
+                                                
+                                                # Read file contents based on type
+                                                success, content = read_document_content(path)
+                                                if not success:
+                                                    raise Exception(content)  # content contains error message
                                                 
                                                 # Format the content with file info
                                                 formatted_content = (
                                                     f"\nContents of {os.path.basename(path)}:\n"
                                                     f"```{ext}\n"
-                                                    f"{file_content}\n"
+                                                    f"{content}\n"
                                                     f"```\n"
                                                 )
                                                 
