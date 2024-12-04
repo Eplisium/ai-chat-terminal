@@ -42,4 +42,4 @@ chats/
 
 # Project specific
 favorites.json
-system_instruction.json
+system_instructions.json
