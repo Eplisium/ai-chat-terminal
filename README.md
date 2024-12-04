@@ -1,22 +1,53 @@
 # ACT (AI Chat Terminal)
 
-A versatile command-line chat interface that supports multiple AI providers including OpenAI and OpenRouter.
+A versatile command-line chat interface that supports multiple AI providers including OpenAI and OpenRouter, featuring rich text formatting and comprehensive file handling capabilities.
 
 ## Features
 
-- Support for multiple AI providers (OpenAI and OpenRouter)
-- Interactive model selection menu
-- Favorite models management
-- Code and file reference support in chat
+### AI Provider Support
+- Multiple AI provider integration (OpenAI and OpenRouter)
+- Interactive model selection menu with provider-specific features
+- Favorite models management for quick access
+- Customizable system instructions for AI behavior
+
+### Document Handling
+- Support for multiple document formats:
+  - Microsoft Word (DOCX)
+  - PDF documents
+  - OpenDocument Text (ODT)
+  - Rich Text Format (RTF)
+  - Plain text files with multiple encoding support
+
+### Chat Features
+- Interactive chat interface with rich text formatting
+- File and directory reference system:
+  - View file contents: `[[file:path/to/file]]`
+  - List directory contents: `[[dir:path/to/directory]]`
+  - View codebase contents: `[[codebase:path/to/codebase]]` (Note: Partial implementation)
+- Image embedding support:
+  - Local images: `[[img:path/to/image.jpg]]`
+  - URL images: `[[img:https://example.com/image.jpg]]`
+- Chat session management:
+  - Save chat history (`/save`)
+  - Clear screen and history (`/clear`)
+  - Exit options ('exit', 'quit', or Ctrl+C)
+
+### Interface
 - Rich console interface with syntax highlighting
+- Progress indicators for AI responses
 - Comprehensive logging system
-- Environment-based configuration
+- Error handling and reporting
 
 ## Requirements
 
 - Python 3.7+
 - Required packages (see requirements.txt)
 - API keys for OpenAI and/or OpenRouter
+- Optional dependencies for document handling:
+  - python-docx (DOCX support)
+  - PyPDF2 (PDF support)
+  - odfpy (ODT support)
+  - pyth (RTF support)
 
 ## Installation
 
@@ -50,18 +81,30 @@ Run the script:
 python main.py
 ```
 
-The interactive menu will guide you through:
-1. Selecting an AI provider
-2. Choosing a model
-3. Starting a chat session
+### Navigation
+The interactive menu provides:
+1. Provider selection (OpenAI/OpenRouter)
+2. Model selection with detailed information
+3. Favorites management
+4. System instruction customization
+5. Chat session initiation
 
-During chat, you can:
-- Reference files using `[[file:path/to/file]]`
-- View directories using `[[dir:path/to/directory]]`
-- View entire codebases using `[[codebase:path/to/codebase]]`
-- Save chat history using `/save`
-- Clear screen and history using `/clear`
-- Exit using 'exit', 'quit', or Ctrl+C
+### Chat Commands
+During chat sessions:
+- `/save` - Save the current chat history (JSON and text formats)
+- `/clear` - Clear screen and reset chat history
+- `exit`, `quit`, or Ctrl+C - End the session
+
+### File References
+Reference files in your messages:
+```
+[[file:example.py]]              # View file contents
+[[file:"path with spaces.txt"]]  # Paths with spaces need quotes
+[[dir:project/src]]              # List directory contents
+[[codebase:src/*.py]]           # View Python files in src (partial implementation)
+[[img:image.jpg]]               # Embed local image
+[[img:"https://..."]]           # Embed image from URL
+```
 
 ## License
 
