@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import base64
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 import dotenv
@@ -15,6 +16,9 @@ from inquirer import themes
 import requests
 from collections import defaultdict
 from rich.syntax import Syntax
+from urllib.parse import urlparse
+from io import BytesIO
+from PIL import Image
 
 # Document handling imports
 try:
@@ -348,6 +352,81 @@ def read_document_content(file_path):
     except Exception as e:
         return False, str(e)
 
+def encode_image_to_base64(image_path_or_url):
+    """
+    Encode an image to base64 string, handling both local files and URLs
+    
+    Args:
+        image_path_or_url (str): Local path or URL to the image
+    
+    Returns:
+        tuple: (success, base64_string or error_message)
+    """
+    try:
+        # Check if it's a URL
+        parsed = urlparse(image_path_or_url)
+        is_url = bool(parsed.scheme and parsed.netloc)
+        
+        if is_url:
+            # Download image from URL
+            response = requests.get(image_path_or_url)
+            response.raise_for_status()  # Raise exception for bad status codes
+            image_data = response.content
+        else:
+            # Read local file
+            with open(image_path_or_url, 'rb') as image_file:
+                image_data = image_file.read()
+        
+        # Validate image data
+        try:
+            img = Image.open(BytesIO(image_data))
+            img.verify()  # Verify it's a valid image
+        except Exception as e:
+            return False, f"Invalid image data: {str(e)}"
+        
+        # Convert to base64
+        base64_string = base64.b64encode(image_data).decode('utf-8')
+        return True, base64_string
+    
+    except requests.exceptions.RequestException as e:
+        return False, f"Failed to download image: {str(e)}"
+    except Exception as e:
+        return False, f"Failed to process image: {str(e)}"
+
+def get_image_mime_type(image_path_or_url):
+    """
+    Get the MIME type of an image
+    
+    Args:
+        image_path_or_url (str): Local path or URL to the image
+    
+    Returns:
+        str: MIME type of the image
+    """
+    try:
+        # Check if it's a URL
+        parsed = urlparse(image_path_or_url)
+        is_url = bool(parsed.scheme and parsed.netloc)
+        
+        if is_url:
+            # Download image from URL
+            response = requests.get(image_path_or_url)
+            response.raise_for_status()
+            image_data = response.content
+        else:
+            # Read local file
+            with open(image_path_or_url, 'rb') as image_file:
+                image_data = image_file.read()
+        
+        # Use PIL to determine image type
+        img = Image.open(BytesIO(image_data))
+        mime_type = f"image/{img.format.lower()}"
+        return mime_type
+    
+    except Exception:
+        # Default to generic image type if detection fails
+        return "image/jpeg"
+
 class AIChat:
     def __init__(self, model_config, logger, console, system_instruction=None):
         """
@@ -424,8 +503,63 @@ class AIChat:
                 self.logger.warning("Empty user input")
                 return None
             
-            # Add user message to conversation history
-            self.messages.append({"role": "user", "content": user_input})
+            # Process image references before sending
+            messages = self.messages.copy()
+            current_message = {"role": "user", "content": user_input}
+            
+            # Check for image references
+            if '[[img:' in user_input and ']]' in user_input:
+                # Convert to list format for content
+                content = []
+                remaining_text = user_input
+                
+                while '[[img:' in remaining_text and ']]' in remaining_text:
+                    # Find image reference
+                    start = remaining_text.find('[[img:')
+                    end = remaining_text.find(']]', start)
+                    
+                    if start > 0:
+                        # Add text before image reference
+                        content.append({
+                            "type": "text",
+                            "text": remaining_text[:start].strip()
+                        })
+                    
+                    # Extract image path/url
+                    img_ref = remaining_text[start+6:end].strip()
+                    # Handle quoted paths
+                    if img_ref.startswith('"') and img_ref.endswith('"'):
+                        img_ref = img_ref[1:-1]
+                    elif img_ref.startswith("'") and img_ref.endswith("'"):
+                        img_ref = img_ref[1:-1]
+                    
+                    # Process image
+                    success, result = encode_image_to_base64(img_ref)
+                    if success:
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{get_image_mime_type(img_ref)};base64,{result}"
+                            }
+                        })
+                    else:
+                        self.logger.error(f"Failed to process image {img_ref}: {result}")
+                        self.console.print(f"[bold red]Error processing image: {result}[/bold red]")
+                    
+                    # Move to remaining text
+                    remaining_text = remaining_text[end+2:]
+                
+                # Add any remaining text
+                if remaining_text.strip():
+                    content.append({
+                        "type": "text",
+                        "text": remaining_text.strip()
+                    })
+                
+                current_message["content"] = content
+            
+            # Add processed message to conversation history
+            messages.append(current_message)
             
             # Show thinking message
             thinking_message = self.console.status("[bold yellow]AI is thinking...[/bold yellow]")
@@ -440,20 +574,20 @@ class AIChat:
                         headers=get_openrouter_headers(self.api_key),
                         json={
                             "model": self.model_id,
-                            "messages": self.messages,
+                            "messages": messages,
                             "max_tokens": 4000,
                             "temperature": 0.7,
                             "stream": False
                         }
                     )
-                    response.raise_for_status()  # Raise exception for bad status codes
+                    response.raise_for_status()
                     data = response.json()
                     ai_response = data['choices'][0]['message']['content'].strip()
                 else:
                     # OpenAI API call
                     response = self.client.chat.completions.create(
                         model=self.model_id,
-                        messages=self.messages,
+                        messages=messages,
                         max_tokens=4000,
                         temperature=0.7,
                         stream=False
@@ -612,6 +746,10 @@ class AIChat:
                 "   [[ dir:folder]]               - List directory contents\n"
                 "   [[ codebase:folder]]          - View all code files in directory\n"
                 '   [[ codebase:"src/*.py"]]      - View Python files in src folder\n'
+                "💾️ Reference images:\n"
+                "   [[ img:image.jpg]]            - Include local image\n"
+                '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
+                '   [[ img:https://...]]          - Include image from URL\n'
                 "💾 Commands:\n"
                 "   - /save - Save the chat history\n"
                 "   - /clear - Clear the screen and chat history\n"
@@ -660,6 +798,10 @@ class AIChat:
                                     "   [[ dir:folder]]               - List directory contents\n"
                                     "   [[ codebase:folder]]          - View all code files in directory\n"
                                     '   [[ codebase:"src/*.py"]]      - View Python files in src folder\n'
+                                    "💾️ Reference images:\n"
+                                    "   [[ img:image.jpg]]            - Include local image\n"
+                                    '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
+                                    '   [[ img:https://...]]          - Include image from URL\n'
                                     "💾 Commands:\n"
                                     "   - /save - Save the chat history\n"
                                     "   - /clear - Clear the screen and chat history\n"
