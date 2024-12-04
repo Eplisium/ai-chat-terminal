@@ -41,4 +41,5 @@ chats/
 *.swo
 
 # Project specific
-favorites.json 
+favorites.json
+system_instruction.json
