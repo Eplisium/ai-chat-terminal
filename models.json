@@ -1,25 +1,84 @@
 {
     "models": [
         {
-            "name": "GPT-4o-Mini",
-            "id": "gpt-4o-mini",
-            "description": "Affordable and intelligent small model for fast, lightweight tasks.",
-            "context_window": 128000,
-            "provider": "openai"
-        },
-        {
             "name": "GPT-4o",
             "id": "gpt-4o",
-            "description": "High-intelligence flagship model for complex, multi-step tasks.",
+            "description": "High-intelligence flagship model for complex, multi-step tasks. Multimodal with text/image input.",
             "context_window": 128000,
             "provider": "openai"
         },
         {
-            "name": "ChatGPT-4o",
-            "id": "chatgpt-4o-latest",
-            "description": "Model version continuously points to the version of GPT-4o used in ChatGPT",
+            "name": "GPT-4o Mini",
+            "id": "gpt-4o-mini",
+            "description": "Affordable and intelligent small model for fast, lightweight tasks. Multimodal with text/image input.",
             "context_window": 128000,
             "provider": "openai"
+        },
+        {
+            "name": "ChatGPT-4o Latest",
+            "id": "chatgpt-4o-latest",
+            "description": "Continuously updated version of GPT-4o used in ChatGPT, updated with significant changes.",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "GPT-4 Turbo",
+            "id": "gpt-4-turbo",
+            "description": "Latest GPT-4 Turbo model with vision capabilities, JSON mode, and function calling.",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "GPT-4 Turbo Preview",
+            "id": "gpt-4-turbo-preview",
+            "description": "Preview version of GPT-4 Turbo with improved instruction following and reduced laziness.",
+            "context_window": 128000,
+            "provider": "openai"
+        },
+        {
+            "name": "GPT-3.5 Turbo",
+            "id": "gpt-3.5-turbo",
+            "description": "Fast and cost-effective model for simpler tasks, with good instruction following.",
+            "context_window": 16385,
+            "provider": "openai"
+        },
+        {
+            "name": "Claude 3.5 Sonnet",
+            "id": "claude-3-5-sonnet-20241022",
+            "alias": "claude-3-5-sonnet-latest",
+            "description": "Fast and highly capable model for a wide range of tasks, with a strong understanding of images.",
+            "context_window": 200000,
+            "provider": "anthropic"
+        },
+        {
+            "name": "Claude 3.5 Haiku",
+            "id": "claude-3-5-haiku-20241022",
+            "alias": "claude-3-5-haiku-latest",
+            "description": "Fastest and most compact model for efficient task completion.",
+            "context_window": 200000,
+            "provider": "anthropic"
+        },
+        {
+            "name": "Claude 3 Opus",
+            "id": "claude-3-opus-20240229",
+            "alias": "claude-3-opus-latest",
+            "description": "Most powerful model for highly complex tasks, with superior performance across all capabilities.",
+            "context_window": 200000,
+            "provider": "anthropic"
+        },
+        {
+            "name": "Claude 3 Sonnet",
+            "id": "claude-3-sonnet-20240229",
+            "description": "Fast and highly capable model for a wide range of tasks.",
+            "context_window": 200000,
+            "provider": "anthropic"
+        },
+        {
+            "name": "Claude 3 Haiku",
+            "id": "claude-3-haiku-20240307",
+            "description": "Fastest and most compact model in the Claude 3 series.",
+            "context_window": 200000,
+            "provider": "anthropic"
         }
     ]
 }

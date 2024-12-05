@@ -1,14 +1,15 @@
 # ACT (AI Chat Terminal)
 
-A versatile command-line chat interface that supports multiple AI providers including OpenAI and OpenRouter, featuring rich text formatting and comprehensive file handling capabilities.
+A versatile command-line chat interface that supports multiple AI providers including OpenAI, Anthropic, and OpenRouter, featuring rich text formatting and comprehensive file handling capabilities.
 
 ## Features
 
 ### AI Provider Support
-- Multiple AI provider integration (OpenAI and OpenRouter)
+- Multiple AI provider integration (OpenAI, Anthropic, and OpenRouter)
 - Interactive model selection menu with provider-specific features
 - Favorite models management for quick access
 - Customizable system instructions for AI behavior
+- Support for image-enabled models (where available)
 
 ### Document Handling
 - Support for multiple document formats:
@@ -23,10 +24,11 @@ A versatile command-line chat interface that supports multiple AI providers incl
 - File and directory reference system:
   - View file contents: `[[file:path/to/file]]`
   - List directory contents: `[[dir:path/to/directory]]`
-  - View codebase contents: `[[codebase:path/to/codebase]]` (Note: Partial implementation)
+  - View codebase contents: `[[codebase:path/to/codebase]]`
 - Image embedding support:
   - Local images: `[[img:path/to/image.jpg]]`
   - URL images: `[[img:https://example.com/image.jpg]]`
+  - Automatic format detection and conversion
 - Chat session management:
   - Save chat history (`/save`)
   - Clear screen and history (`/clear`)
@@ -37,14 +39,18 @@ A versatile command-line chat interface that supports multiple AI providers incl
 ### Interface
 - Rich console interface with syntax highlighting
 - Progress indicators for AI responses
-- Comprehensive logging system
-- Error handling and reporting
+- Comprehensive logging system with rotation
+- Detailed error handling and reporting
+- Interactive menu system with provider categorization
 
 ## Requirements
 
 - Python 3.7+
 - Required packages (see requirements.txt)
-- API keys for OpenAI and/or OpenRouter
+- API keys for supported providers:
+  - OpenAI API key
+  - Anthropic API key (optional)
+  - OpenRouter API key (optional)
 - Optional dependencies for document handling:
   - python-docx (DOCX support)
   - PyPDF2 (PDF support)
@@ -73,6 +79,7 @@ pip install -r requirements.txt
 4. Create a `.env` file in the project root with your API keys:
 ```
 OPENAI_API_KEY=your_openai_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
 OPENROUTER_API_KEY=your_openrouter_api_key
 ```
 
@@ -85,9 +92,9 @@ python main.py
 
 ### Navigation
 The interactive menu provides:
-1. Provider selection (OpenAI/OpenRouter)
-2. Model selection with detailed information
-3. Favorites management
+1. Provider selection (OpenAI/Anthropic/OpenRouter)
+2. Favorite models management
+3. Model selection with detailed information
 4. System instruction customization
 5. Chat session initiation
 
@@ -105,10 +112,17 @@ Reference files in your messages:
 [[file:example.py]]              # View file contents
 [[file:"path with spaces.txt"]]  # Paths with spaces need quotes
 [[dir:project/src]]              # List directory contents
-[[codebase:src/*.py]]           # View Python files in src (partial implementation)
+[[codebase:src/*.py]]           # View Python files in src
 [[img:image.jpg]]               # Embed local image
 [[img:"https://..."]]           # Embed image from URL
 ```
+
+### Chat History
+Chat histories are automatically saved in both JSON and text formats, organized by:
+- Provider (OpenAI, Anthropic, OpenRouter)
+- Model company (for OpenRouter)
+- Model name
+- Timestamp
 
 ## License
 

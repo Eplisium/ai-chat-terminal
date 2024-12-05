@@ -59,6 +59,13 @@ try:
 except ImportError:
     OPENROUTER_AVAILABLE = False
 
+try:
+    import anthropic
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
 class SystemInstructionsManager:
     """Class to manage system instructions for AI models"""
     def __init__(self, logger, console):
@@ -467,6 +474,8 @@ class AIChat:
         Args:
             model_config (dict): Configuration for the selected model
         """
+        self.provider = model_config.get('provider', 'openai').lower()
+        
         if self.provider == 'openrouter':
             if not OPENROUTER_AVAILABLE:
                 raise ImportError("OpenRouter library not installed. Please install 'openai'.")
@@ -477,7 +486,19 @@ class AIChat:
                 raise ValueError("OpenRouter API key not found in .env file")
             
             self.api_base = "https://openrouter.ai/api/v1"
-        else:
+        
+        elif self.provider == 'anthropic':
+            if not ANTHROPIC_AVAILABLE:
+                raise ImportError("Anthropic library not installed. Please install 'anthropic'.")
+            
+            api_key = os.getenv('ANTHROPIC_API_KEY')
+            if not api_key:
+                self.logger.error("Anthropic API key not found")
+                raise ValueError("Anthropic API key not found in .env file")
+            
+            self.client = Anthropic(api_key=api_key)
+        
+        else:  # openai
             if not OPENAI_AVAILABLE:
                 raise ImportError("OpenAI library not installed. Please install 'openai'.")
             
@@ -536,12 +557,22 @@ class AIChat:
                     # Process image
                     success, result = encode_image_to_base64(img_ref)
                     if success:
-                        content.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{get_image_mime_type(img_ref)};base64,{result}"
-                            }
-                        })
+                        if self.provider == 'anthropic':
+                            content.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": get_image_mime_type(img_ref),
+                                    "data": result
+                                }
+                            })
+                        else:
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{get_image_mime_type(img_ref)};base64,{result}"
+                                }
+                            })
                     else:
                         self.logger.error(f"Failed to process image {img_ref}: {result}")
                         self.console.print(f"[bold red]Error processing image: {result}[/bold red]")
@@ -566,8 +597,17 @@ class AIChat:
             thinking_message.start()
             
             try:
-                # API call based on provider
-                if self.provider == 'openrouter':
+                if self.provider == 'anthropic':
+                    # Anthropic API call
+                    response = self.client.messages.create(
+                        model=self.model_id,
+                        messages=messages[1:],  # Skip system message for Anthropic
+                        system=self.messages[0]['content'],  # Use system message separately
+                        max_tokens=4000,
+                        temperature=0.7
+                    )
+                    ai_response = response.content[0].text
+                elif self.provider == 'openrouter':
                     # OpenRouter API call
                     response = requests.post(
                         f"{self.api_base}/chat/completions",
@@ -1703,15 +1743,30 @@ class AIChatApp:
         
         while True:
             try:
-                # Main menu choices
+                # Check API keys availability
+                openai_available = bool(os.getenv('OPENAI_API_KEY'))
+                openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
+                anthropic_available = bool(os.getenv('ANTHROPIC_API_KEY'))
+                
+                # Main menu choices with availability indicators
                 main_choices = [
                     ("=== Select Provider ===", None),
                     ("⭐ Favorite Models", "favorites"),
-                    ("OpenAI Models", "openai"),
-                    ("OpenRouter Models", "openrouter"),
+                ]
+                
+                # Add providers based on API key availability
+                if openai_available:
+                    main_choices.append(("OpenAI Models", "openai"))
+                if openrouter_available:
+                    main_choices.append(("OpenRouter Models", "openrouter"))
+                if anthropic_available:
+                    main_choices.append(("Anthropic Models", "anthropic"))
+                
+                # Add remaining menu items
+                main_choices.extend([
                     ("⚙️ System Instructions", "instructions"),
                     ("Exit Application", "exit")
-                ]
+                ])
                 
                 # Create the main menu question
                 questions = [
@@ -1763,27 +1818,29 @@ class AIChatApp:
                     model_answer = inquirer.prompt(model_question)
                     if model_answer and model_answer['model'] is not None:
                         selected_model = model_answer['model']
-                        # Add option to favorite after selection
-                        action_choices = [
-                            ("Start Chat", "chat"),
-                            ("Add to Favorites", "favorite"),
-                            ("Back", "back")
-                        ]
-                        
-                        action_question = [
-                            inquirer.List('action',
-                                message=f"Action for {selected_model['name']}",
-                                choices=action_choices,
-                                carousel=True
-                            ),
-                        ]
-                        
-                        action_answer = inquirer.prompt(action_question)
-                        if action_answer:
-                            if action_answer['action'] == "chat":
-                                self.start_chat(selected_model)
-                            elif action_answer['action'] == "favorite":
-                                self.add_to_favorites(selected_model)
+                        self._handle_model_selection(selected_model)
+                
+                elif selected_provider == "anthropic":
+                    # Filter and display Anthropic models
+                    anthropic_models = [
+                        (f"{model['name']} - {model.get('description', 'No description')}", model)
+                        for model in self.models_config
+                        if model.get('provider', '').lower() == 'anthropic'
+                    ]
+                    anthropic_models.append(("Back", None))
+                    
+                    model_question = [
+                        inquirer.List('model',
+                            message="Select Anthropic Model",
+                            choices=anthropic_models,
+                            carousel=True
+                        ),
+                    ]
+                    
+                    model_answer = inquirer.prompt(model_question)
+                    if model_answer and model_answer['model'] is not None:
+                        selected_model = model_answer['model']
+                        self._handle_model_selection(selected_model)
                 
                 elif selected_provider == "openrouter":
                     # Show OpenRouter nested menu
@@ -1796,27 +1853,7 @@ class AIChatApp:
                             'description': selected_model.get('description', 'No description'),
                             'provider': 'openrouter'
                         }
-                        # Add option to favorite after selection
-                        action_choices = [
-                            ("Start Chat", "chat"),
-                            ("Add to Favorites", "favorite"),
-                            ("Back", "back")
-                        ]
-                        
-                        action_question = [
-                            inquirer.List('action',
-                                message=f"Action for {model_config['name']}",
-                                choices=action_choices,
-                                carousel=True
-                            ),
-                        ]
-                        
-                        action_answer = inquirer.prompt(action_question)
-                        if action_answer:
-                            if action_answer['action'] == "chat":
-                                self.start_chat(model_config)
-                            elif action_answer['action'] == "favorite":
-                                self.add_to_favorites(model_config)
+                        self._handle_model_selection(model_config)
             
             except KeyboardInterrupt:
                 self.logger.warning("Application interrupted")
@@ -1830,6 +1867,34 @@ class AIChatApp:
                 self.console.print(f"[bold red]Error in menu: {e}[/bold red]")
                 continue
     
+    def _handle_model_selection(self, selected_model):
+        """
+        Handle the model selection and subsequent actions
+        
+        Args:
+            selected_model (dict): The selected model configuration
+        """
+        action_choices = [
+            ("Start Chat", "chat"),
+            ("Add to Favorites", "favorite"),
+            ("Back", "back")
+        ]
+        
+        action_question = [
+            inquirer.List('action',
+                message=f"Action for {selected_model['name']}",
+                choices=action_choices,
+                carousel=True
+            ),
+        ]
+        
+        action_answer = inquirer.prompt(action_question)
+        if action_answer:
+            if action_answer['action'] == "chat":
+                self.start_chat(selected_model)
+            elif action_answer['action'] == "favorite":
+                self.add_to_favorites(selected_model)
+
     def start_chat(self, model_config):
         """
         Start chat with selected model
