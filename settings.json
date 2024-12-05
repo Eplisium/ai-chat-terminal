@@ -1,0 +1,52 @@
+{
+    "codebase_search": {
+        "file_types": [
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".java",
+            ".cpp",
+            ".c",
+            ".h",
+            ".cs",
+            ".php",
+            ".rb",
+            ".go",
+            ".rs",
+            ".swift",
+            ".kt",
+            ".scala",
+            ".html",
+            ".css",
+            ".scss",
+            ".sass",
+            ".less",
+            ".vue",
+            ".sql",
+            ".md",
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml"
+        ],
+        "enabled_types": [
+            ".py",
+            ".md",
+            ".json",
+            ".txt"
+        ],
+        "search_subdirectories": true,
+        "max_file_size_mb": 10,
+        "exclude_patterns": [
+            "node_modules",
+            "venv",
+            ".git",
+            "__pycache__",
+            "build",
+            "dist"
+        ]
+    }
+}

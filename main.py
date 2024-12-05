@@ -66,6 +66,197 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
+class SettingsManager:
+    """Class to manage application settings"""
+    def __init__(self, logger, console):
+        self.logger = logger
+        self.console = console
+        self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
+        self.settings = self._load_settings()
+
+    def _load_settings(self):
+        """Load settings from file"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {
+                'codebase_search': {
+                    'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.html', '.css', '.scss', '.sass', '.less', '.vue', '.sql', '.md', '.txt', '.json', '.yaml', '.yml', '.toml'],
+                    'enabled_types': ['.py'],  # Default to only Python files
+                    'search_subdirectories': True,
+                    'max_file_size_mb': 10,
+                    'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist']
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"Error loading settings: {e}")
+            return self._load_settings()  # Return default settings
+
+    def _save_settings(self):
+        """Save settings to file"""
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception as e:
+            self.logger.error(f"Error saving settings: {e}")
+
+    def get_setting(self, category, key):
+        """Get a specific setting value"""
+        return self.settings.get(category, {}).get(key)
+
+    def update_setting(self, category, key, value):
+        """Update a specific setting value"""
+        if category not in self.settings:
+            self.settings[category] = {}
+        self.settings[category][key] = value
+        self._save_settings()
+
+    def manage_codebase_settings(self):
+        """Manage codebase search settings"""
+        while True:
+            codebase_settings = self.settings['codebase_search']
+            enabled_types = set(codebase_settings['enabled_types'])
+            all_types = codebase_settings['file_types']
+
+            choices = [
+                ("=== Codebase Search Settings ===", None),
+                (f"Search Subdirectories: {'✓' if codebase_settings['search_subdirectories'] else '✗'}", "toggle_subdirs"),
+                ("Manage File Types", "file_types"),
+                ("Set Max File Size (MB)", "max_size"),
+                ("Manage Exclude Patterns", "exclude_patterns"),
+                ("Back to Settings Menu", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Select setting to modify",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "toggle_subdirs":
+                current = codebase_settings['search_subdirectories']
+                self.update_setting('codebase_search', 'search_subdirectories', not current)
+                self.console.print(f"[green]Search subdirectories {'enabled' if not current else 'disabled'}[/green]")
+
+            elif answer['action'] == "file_types":
+                # Create checkboxes for file types
+                file_type_choices = [(f"{ft} {'[✓]' if ft in enabled_types else '[ ]'}", ft) for ft in all_types]
+                file_type_choices.append(("Done", None))
+
+                while True:
+                    type_question = [
+                        inquirer.List('file_type',
+                            message="Toggle file types (select to toggle, 'Done' to finish)",
+                            choices=file_type_choices,
+                            carousel=True
+                        ),
+                    ]
+
+                    type_answer = inquirer.prompt(type_question)
+                    if not type_answer or type_answer['file_type'] is None:
+                        break
+
+                    selected_type = type_answer['file_type']
+                    if selected_type in enabled_types:
+                        enabled_types.remove(selected_type)
+                    else:
+                        enabled_types.add(selected_type)
+
+                    # Update choices to reflect changes
+                    file_type_choices = [(f"{ft} {'[✓]' if ft in enabled_types else '[ ]'}", ft) for ft in all_types]
+                    file_type_choices.append(("Done", None))
+
+                self.update_setting('codebase_search', 'enabled_types', list(enabled_types))
+                self.console.print("[green]File types updated[/green]")
+
+            elif answer['action'] == "max_size":
+                size_question = [
+                    inquirer.Text('size',
+                        message="Enter maximum file size in MB",
+                        validate=lambda _, x: x.isdigit() and int(x) > 0,
+                        default=str(codebase_settings['max_file_size_mb'])
+                    )
+                ]
+
+                size_answer = inquirer.prompt(size_question)
+                if size_answer:
+                    self.update_setting('codebase_search', 'max_file_size_mb', int(size_answer['size']))
+                    self.console.print("[green]Maximum file size updated[/green]")
+
+            elif answer['action'] == "exclude_patterns":
+                patterns = codebase_settings['exclude_patterns']
+                while True:
+                    pattern_choices = [
+                        ("Add New Pattern", "add"),
+                        ("Remove Pattern", "remove"),
+                        ("View Current Patterns", "view"),
+                        ("Back", "back")
+                    ]
+
+                    pattern_question = [
+                        inquirer.List('action',
+                            message="Manage exclude patterns",
+                            choices=pattern_choices,
+                            carousel=True
+                        ),
+                    ]
+
+                    pattern_answer = inquirer.prompt(pattern_question)
+                    if not pattern_answer or pattern_answer['action'] == "back":
+                        break
+
+                    if pattern_answer['action'] == "add":
+                        add_question = [
+                            inquirer.Text('pattern',
+                                message="Enter pattern to exclude (e.g., node_modules)",
+                                validate=lambda _, x: len(x.strip()) > 0
+                            )
+                        ]
+
+                        add_answer = inquirer.prompt(add_question)
+                        if add_answer:
+                            patterns.append(add_answer['pattern'].strip())
+                            self.update_setting('codebase_search', 'exclude_patterns', patterns)
+                            self.console.print("[green]Pattern added[/green]")
+
+                    elif pattern_answer['action'] == "remove":
+                        if not patterns:
+                            self.console.print("[yellow]No patterns to remove[/yellow]")
+                            continue
+
+                        remove_choices = [(p, p) for p in patterns]
+                        remove_choices.append(("Back", None))
+
+                        remove_question = [
+                            inquirer.List('pattern',
+                                message="Select pattern to remove",
+                                choices=remove_choices,
+                                carousel=True
+                            ),
+                        ]
+
+                        remove_answer = inquirer.prompt(remove_question)
+                        if remove_answer and remove_answer['pattern']:
+                            patterns.remove(remove_answer['pattern'])
+                            self.update_setting('codebase_search', 'exclude_patterns', patterns)
+                            self.console.print("[green]Pattern removed[/green]")
+
+                    elif pattern_answer['action'] == "view":
+                        if patterns:
+                            self.console.print("\n[bold]Current exclude patterns:[/bold]")
+                            for pattern in patterns:
+                                self.console.print(f"• {pattern}")
+                        else:
+                            self.console.print("[yellow]No exclude patterns defined[/yellow]")
+                        self.console.input("\nPress Enter to continue...")
+
 class SystemInstructionsManager:
     """Class to manage system instructions for AI models"""
     def __init__(self, logger, console):
@@ -453,6 +644,9 @@ class AIChat:
         self.model_name = model_config['name']
         self.provider = model_config.get('provider', 'openai')
         self.start_time = datetime.now()  # Add start time for chat
+        
+        # Initialize settings manager
+        self.settings_manager = SettingsManager(logger, console)
 
         # Initialize client based on provider
         self._setup_client(model_config)
@@ -1183,30 +1377,50 @@ class AIChat:
                                     
                                     def is_code_file(filename):
                                         """Check if a file is likely to contain code or documentation"""
-                                        code_extensions = {
-                                            # Code files
-                                            '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c',
-                                            '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt',
-                                            '.scala', '.m', '.mm', '.sh', '.bash', '.ps1', '.r', '.pl',
-                                            '.html', '.css', '.scss', '.sass', '.less', '.vue', '.sql',
-                                            # Documentation files
-                                            '.md', '.markdown', '.rst', '.txt', '.json', '.yaml', '.yml',
-                                            '.toml', '.ini', '.cfg', '.conf'
-                                        }
-                                        return os.path.splitext(filename)[1].lower() in code_extensions
+                                        # Get enabled file types from settings
+                                        enabled_types = self.settings_manager.get_setting('codebase_search', 'enabled_types')
+                                        return os.path.splitext(filename)[1].lower() in enabled_types
                                     
                                     def collect_code_files(path):
                                         """Recursively collect code and documentation files from directory"""
                                         code_files = []
                                         try:
+                                            # Get settings
+                                            search_subdirs = self.settings_manager.get_setting('codebase_search', 'search_subdirectories')
+                                            max_size = self.settings_manager.get_setting('codebase_search', 'max_file_size_mb') * 1024 * 1024  # Convert to bytes
+                                            exclude_patterns = self.settings_manager.get_setting('codebase_search', 'exclude_patterns')
+                                            
                                             if os.path.isfile(path):
-                                                if is_code_file(path):
+                                                if is_code_file(path) and os.path.getsize(path) <= max_size:
                                                     code_files.append(path)
                                             elif os.path.isdir(path):
-                                                for root, _, files in os.walk(path):
-                                                    for file in sorted(files):  # Sort files within each directory
-                                                        file_path = os.path.join(root, file)
-                                                        if is_code_file(file):
+                                                # Function to check if path should be excluded
+                                                def should_exclude(p):
+                                                    for pattern in exclude_patterns:
+                                                        if pattern in p:
+                                                            return True
+                                                    return False
+                                                
+                                                if search_subdirs:
+                                                    # Walk through directory recursively
+                                                    for root, dirs, files in os.walk(path):
+                                                        # Skip excluded directories
+                                                        dirs[:] = [d for d in dirs if not should_exclude(os.path.join(root, d))]
+                                                        
+                                                        for file in sorted(files):
+                                                            file_path = os.path.join(root, file)
+                                                            if (is_code_file(file) and 
+                                                                not should_exclude(file_path) and 
+                                                                os.path.getsize(file_path) <= max_size):
+                                                                code_files.append(file_path)
+                                                else:
+                                                    # Only look at files in the current directory
+                                                    for file in sorted(os.listdir(path)):
+                                                        file_path = os.path.join(path, file)
+                                                        if (os.path.isfile(file_path) and 
+                                                            is_code_file(file) and 
+                                                            not should_exclude(file_path) and 
+                                                            os.path.getsize(file_path) <= max_size):
                                                             code_files.append(file_path)
                                         except Exception as e:
                                             self.logger.error(f"Error collecting files from {path}: {e}")
@@ -1323,8 +1537,9 @@ class AIChatApp:
         self.logger = logger
         self.console = console
         
-        # Initialize system instructions manager
+        # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
+        self.settings_manager = SettingsManager(logger, console)
         
         # Load models from JSON
         try:
@@ -1724,6 +1939,30 @@ class AIChatApp:
                 # Wait for user acknowledgment
                 self.console.input("\nPress Enter to continue...")
 
+    def manage_settings(self):
+        """Display settings management menu"""
+        while True:
+            choices = [
+                ("=== Application Settings ===", None),
+                ("🔍 Codebase Search Settings", "codebase"),
+                ("Back to Main Menu", "back")
+            ]
+
+            questions = [
+                inquirer.List('setting',
+                    message="Select settings category",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['setting'] == "back":
+                break
+
+            if answer['setting'] == "codebase":
+                self.settings_manager.manage_codebase_settings()
+
     def display_main_menu(self):
         """
         Display the main menu for model selection
@@ -1793,10 +2032,11 @@ class AIChatApp:
                 main_choices.extend([
                     ("═══ System Settings ═══", None),
                     ("⚙️ System Instructions  〈Configure AI Behavior〉", "instructions"),
+                    ("⚙️ Application Settings 〈Configure App Behavior〉", "settings"),
                     ("═══ Application ═══", None),
                     ("✖ Exit Application    〈Close ACT〉", "exit")
                 ])
-                
+
                 # Create custom theme for inquirer
                 theme = themes.load_theme_from_dict({
                     "Question": {
@@ -1838,6 +2078,9 @@ class AIChatApp:
 
                 if selected_provider == "instructions":
                     self.manage_instructions()
+                    continue
+                elif selected_provider == "settings":
+                    self.manage_settings()
                     continue
                 elif selected_provider == "favorites":
                     self.manage_favorites()
