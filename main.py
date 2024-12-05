@@ -754,7 +754,8 @@ class AIChat:
             "   - /save - Save the chat history\n"
             "   - /clear - Clear the screen and chat history\n"
             "   - /insert - Insert multiline text (end with END on new line)\n"
-            "❌ Type 'exit', 'quit', or press Ctrl+C to end the session"
+            "   - /end - End the chat session\n"
+            "❌ Type 'exit', 'quit', 'bye', or press Ctrl+C to end the session"
         )
         
         self.console.print(
@@ -842,6 +843,10 @@ class AIChat:
                             else:
                                 self.console.print("[yellow]No content provided, input cancelled[/yellow]")
                                 continue
+                        elif command == '/end':
+                            self.logger.info("Chat session ended by user (/end command)")
+                            self.console.print("[bold cyan]Chat session ended. Goodbye![/bold cyan]")
+                            break
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
