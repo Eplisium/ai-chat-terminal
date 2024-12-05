@@ -619,14 +619,47 @@ class AIChat:
         if not response_text:
             return
 
-        # Create a panel to display the response
+        # Process the response text to identify natural breaks (like paragraphs and lists)
+        sections = []
+        current_section = []
+        lines = response_text.split('\n')
+        
+        for line in lines:
+            # Check for natural breaks like empty lines or list markers
+            if (not line.strip() and current_section) or \
+               (line.strip().startswith(('•', '-', '*', '1.', '#')) and current_section):
+                if current_section:
+                    sections.append('\n'.join(current_section))
+                    current_section = []
+            if line.strip():  # Only add non-empty lines
+                current_section.append(line)
+        
+        if current_section:
+            sections.append('\n'.join(current_section))
+        
+        # If no clear sections, treat entire response as one section
+        if not sections:
+            sections = [response_text]
+        
+        # Create a single panel with enhanced formatting
+        formatted_text = []
+        for i, section in enumerate(sections):
+            if i > 0:  # Add spacing between sections
+                formatted_text.append("")  # Empty line for spacing
+            formatted_text.append(section)
+        
+        # Join all sections with proper spacing
+        final_text = '\n'.join(formatted_text)
+        
+        # Create a single panel with the entire formatted content
         self.console.print(
             Panel(
-                Markdown(response_text),
+                Markdown(final_text),
                 title=f"[bold #A6E22E]{self.model_name}[/]",
                 border_style="bright_blue",
                 padding=(1, 2),
-                expand=True
+                expand=True,
+                highlight=True
             )
         )
     
