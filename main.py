@@ -562,7 +562,7 @@ class AIChat:
             messages.append(current_message)
             
             # Show thinking message
-            thinking_message = self.console.status("[bold yellow]AI is thinking...[/bold yellow]")
+            thinking_message = self.console.status(f"[bold yellow]{self.model_name} is thinking...[/bold yellow]")
             thinking_message.start()
             
             try:
@@ -736,25 +736,30 @@ class AIChat:
         # Get the script directory for relative paths
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
+        # Store welcome panel text to avoid processing its example paths
+        welcome_text = (
+            f"[bold cyan]Chat session with {self.model_name}[/bold cyan]\n\n"
+            "📝 Type your message and press Enter to send\n"
+            "🔗 Reference files and directories:\n"
+            "   [[ file:example.py]]          - View single file contents\n"
+            '   [[ file:"path/to/file.txt"]]  - Paths with spaces need quotes\n'
+            "   [[ dir:folder]]               - List directory contents\n"
+            "   [[ codebase:folder]]          - View all code files in directory\n"
+            '   [[ codebase:"src/*.py"]]      - View Python files in src folder\n'
+            "💾️ Reference images:\n"
+            "   [[ img:image.jpg]]            - Include local image\n"
+            '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
+            '   [[ img:https://...]]          - Include image from URL\n'
+            "💾 Commands:\n"
+            "   - /save - Save the chat history\n"
+            "   - /clear - Clear the screen and chat history\n"
+            "   - /insert - Insert multiline text (end with END on new line)\n"
+            "❌ Type 'exit', 'quit', or press Ctrl+C to end the session"
+        )
+        
         self.console.print(
             Panel(
-                f"[bold cyan]Chat session with {self.model_name}[/bold cyan]\n\n"
-                "📝 Type your message and press Enter to send\n"
-                "🔗 Reference files and directories:\n"
-                "   [[ file:example.py]]          - View single file contents\n"
-                '   [[ file:"path/to/file.txt"]]  - Paths with spaces need quotes\n'
-                "   [[ dir:folder]]               - List directory contents\n"
-                "   [[ codebase:folder]]          - View all code files in directory\n"
-                '   [[ codebase:"src/*.py"]]      - View Python files in src folder\n'
-                "💾️ Reference images:\n"
-                "   [[ img:image.jpg]]            - Include local image\n"
-                '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
-                '   [[ img:https://...]]          - Include image from URL\n'
-                "💾 Commands:\n"
-                "   - /save - Save the chat history\n"
-                "   - /clear - Clear the screen and chat history\n"
-                "   - /insert - Insert multiline text (end with END on new line)\n"
-                "❌ Type 'exit', 'quit', or press Ctrl+C to end the session",
+                welcome_text,
                 title="[bold white]Chat Session[/bold white]",
                 border_style="cyan",
                 padding=(1, 2)
@@ -791,23 +796,7 @@ class AIChat:
                             # Redisplay the welcome panel
                             self.console.print(
                                 Panel(
-                                    f"[bold cyan]Chat session with {self.model_name}[/bold cyan]\n\n"
-                                    "📝 Type your message and press Enter to send\n"
-                                    "🔗 Reference files and directories:\n"
-                                    "   [[ file:example.py]]          - View single file contents\n"
-                                    '   [[ file:"path/to/file.txt"]]  - Paths with spaces need quotes\n'
-                                    "   [[ dir:folder]]               - List directory contents\n"
-                                    "   [[ codebase:folder]]          - View all code files in directory\n"
-                                    '   [[ codebase:"src/*.py"]]      - View Python files in src folder\n'
-                                    "💾️ Reference images:\n"
-                                    "   [[ img:image.jpg]]            - Include local image\n"
-                                    '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
-                                    '   [[ img:https://...]]          - Include image from URL\n'
-                                    "💾 Commands:\n"
-                                    "   - /save - Save the chat history\n"
-                                    "   - /clear - Clear the screen and chat history\n"
-                                    "   - /insert - Insert multiline text (end with END on new line)\n"
-                                    "❌ Type 'exit', 'quit', or press Ctrl+C to end the session",
+                                    welcome_text,
                                     title="[bold white]Chat Session[/bold white]",
                                     border_style="cyan",
                                     padding=(1, 2)
