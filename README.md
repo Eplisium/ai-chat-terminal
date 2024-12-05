@@ -30,6 +30,7 @@ A versatile command-line chat interface that supports multiple AI providers incl
 - Chat session management:
   - Save chat history (`/save`)
   - Clear screen and history (`/clear`)
+  - Insert multiline text (`/insert`)
   - Exit options ('exit', 'quit', or Ctrl+C)
 
 ### Interface
@@ -93,6 +94,7 @@ The interactive menu provides:
 During chat sessions:
 - `/save` - Save the current chat history (JSON and text formats)
 - `/clear` - Clear screen and reset chat history
+- `/insert` - Insert multiline text (end with END on new line)
 - `exit`, `quit`, or Ctrl+C - End the session
 
 ### File References
