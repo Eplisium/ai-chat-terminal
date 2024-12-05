@@ -32,7 +32,7 @@ A versatile command-line chat interface that supports multiple AI providers incl
   - Clear screen and history (`/clear`)
   - Insert multiline text (`/insert`)
   - End chat session (`/end`)
-  - Exit options ('exit', 'quit', `bye`, or Ctrl+C)
+  - Exit options (`exit`, `quit`, `bye`, or Ctrl+C)
 
 ### Interface
 - Rich console interface with syntax highlighting
