@@ -42,6 +42,11 @@ A versatile command-line chat interface that supports multiple AI providers incl
 - Comprehensive logging system with rotation
 - Detailed error handling and reporting
 - Interactive menu system with provider categorization
+- Settings management:
+  - Codebase search configuration
+  - File type filtering
+  - Search depth control
+  - Exclusion patterns
 
 ## Requirements
 
@@ -97,6 +102,11 @@ The interactive menu provides:
 3. Model selection with detailed information
 4. System instruction customization
 5. Chat session initiation
+6. Application settings management:
+   - Configure codebase search behavior
+   - Manage file type inclusions
+   - Set search depth preferences
+   - Define exclusion patterns
 
 ### Chat Commands
 During chat sessions:
@@ -123,6 +133,11 @@ Chat histories are automatically saved in both JSON and text formats, organized 
 - Model company (for OpenRouter)
 - Model name
 - Timestamp
+- Includes:
+  - Full conversation history
+  - System instructions used
+  - Model configuration
+  - Timestamps for each message
 
 ## License
 
