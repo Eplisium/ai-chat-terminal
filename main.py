@@ -184,7 +184,7 @@ def setup_logging():
                 omit_repeated_times=False
             ),
             RotatingFileHandler(
-                os.path.join(logs_dir, f'ai_chat_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+                os.path.join(logs_dir, f'act_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
                 maxBytes=10*1024*1024,
                 backupCount=5,
                 encoding='utf-8'
@@ -192,7 +192,7 @@ def setup_logging():
         ]
     )
 
-    return logging.getLogger("AIChat"), console
+    return logging.getLogger("ACT"), console
 
 def sanitize_path(path):
     """
@@ -1730,15 +1730,34 @@ class AIChatApp:
         """
         self.logger.info("Displaying main menu")
         
-        # Display welcome message
+        # Display welcome message with ASCII art logo
+        logo = """[bold cyan]
+    ╔═══╗╔═══╗╔════╗
+    ║╔═╗║║╔═╗║║╔╗╔╗║
+    ║║ ║║║║ ╚╝╚╝║║╚╝
+    ║╔═╗║║║ ╔╗  ║║  
+    ║║ ║║║╚═╝║  ║║  
+    ╚╝ ╚╝╚═══╝  ╚╝  
+[/bold cyan]"""
+        
+        welcome_text = (
+            f"{logo}\n"
+            "[bold white]Welcome to[/bold white] [bold cyan]ACT[/bold cyan] [bold white](AI Chat Terminal)[/bold white]\n\n"
+            "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n"
+            "🤖 [bold]Your Gateway to Advanced AI Conversations[/bold]\n"
+            "📝 Choose from multiple AI models and providers\n"
+            "💡 Each model offers unique capabilities\n"
+            "⚡ Powered by OpenAI, Anthropic, and OpenRouter\n"
+            "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n\n"
+            "[dim]Press Ctrl+C at any time to exit[/dim]"
+        )
+        
         self.console.print(Panel(
-            "[bold cyan]Welcome to AI Chat[/bold cyan]\n\n"
-            "🤖 Choose your AI companion from the available models below.\n"
-            "📝 Each model has different capabilities and specialties.\n"
-            "❌ Press Ctrl+C to exit at any time.",
-            title="[bold white]AI Chat Menu[/bold white]",
+            welcome_text,
+            title="[bold white]✨ ACT - Advanced AI Chat Terminal ✨[/bold white]",
             border_style="cyan",
-            padding=(1, 2)
+            padding=(1, 2),
+            highlight=True
         ))
         
         while True:
@@ -1748,43 +1767,70 @@ class AIChatApp:
                 openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
                 anthropic_available = bool(os.getenv('ANTHROPIC_API_KEY'))
                 
-                # Main menu choices with availability indicators
+                # Main menu choices with enhanced formatting
                 main_choices = [
-                    ("=== Select Provider ===", None),
-                    ("⭐ Favorite Models", "favorites"),
+                    ("═══ Select Your AI Provider ═══", None),
+                    ("★ Favorite Models   〈Your preferred AI companions〉", "favorites"),
                 ]
                 
-                # Add providers based on API key availability
+                # Add providers based on API key availability with status indicators
                 if openai_available:
-                    main_choices.append(("OpenAI Models", "openai"))
-                if openrouter_available:
-                    main_choices.append(("OpenRouter Models", "openrouter"))
-                if anthropic_available:
-                    main_choices.append(("Anthropic Models", "anthropic"))
+                    main_choices.append(("🟢 OpenAI Models    〈GPT-4, GPT-3.5 & More〉", "openai"))
+                else:
+                    main_choices.append(("○ OpenAI Models    〈API Key Required〉", None))
                 
-                # Add remaining menu items
+                if openrouter_available:
+                    main_choices.append(("🟢 OpenRouter Models 〈Multiple Providers〉", "openrouter"))
+                else:
+                    main_choices.append(("○ OpenRouter Models 〈API Key Required〉", None))
+                
+                if anthropic_available:
+                    main_choices.append(("🟢 Anthropic Models 〈Claude & More〉", "anthropic"))
+                else:
+                    main_choices.append(("○ Anthropic Models 〈API Key Required〉", None))
+                
+                # Add remaining menu items with enhanced formatting
                 main_choices.extend([
-                    ("⚙️ System Instructions", "instructions"),
-                    ("Exit Application", "exit")
+                    ("═══ System Settings ═══", None),
+                    ("⚙️ System Instructions  〈Configure AI Behavior〉", "instructions"),
+                    ("═══ Application ═══", None),
+                    ("✖ Exit Application    〈Close ACT〉", "exit")
                 ])
                 
-                # Create the main menu question
+                # Create custom theme for inquirer
+                theme = themes.load_theme_from_dict({
+                    "Question": {
+                        "mark_color": "cyan",
+                        "brackets_color": "cyan",
+                        "default_color": "white"
+                    },
+                    "List": {
+                        "selection_color": "cyan",
+                        "selection_cursor": "❯",
+                        "unselected_color": "white"
+                    }
+                })
+                
+                # Create the main menu question with custom theme
                 questions = [
                     inquirer.List('provider',
-                        message="Select AI Provider",
+                        message="Select an option:",
                         choices=main_choices,
                         carousel=True
                     ),
                 ]
                 
-                # Prompt user for provider selection
-                answer = inquirer.prompt(questions)
+                # Prompt user for provider selection with custom theme
+                answer = inquirer.prompt(questions, theme=theme)
                 
                 if not answer or answer['provider'] == "exit":
                     self.logger.info("User selected to exit")
                     self.console.print(Panel(
-                        "[bold yellow]Thank you for using AI Chat! Goodbye![/bold yellow]",
-                        border_style="yellow"
+                        "[bold yellow]Thank you for using ACT!\n\n"
+                        "We hope to see you again soon![/bold yellow]",
+                        title="[bold white]👋 Goodbye![/bold white]",
+                        border_style="yellow",
+                        padding=(1, 2)
                     ))
                     break
                 
@@ -1858,7 +1904,7 @@ class AIChatApp:
             except KeyboardInterrupt:
                 self.logger.warning("Application interrupted")
                 self.console.print(Panel(
-                    "\n[bold yellow]Thanks for using AI Chat! Goodbye![/bold yellow]",
+                    "\n[bold yellow]Thanks for using ACT! Goodbye![/bold yellow]",
                     border_style="yellow"
                 ))
                 break
