@@ -753,6 +753,7 @@ class AIChat:
                 "💾 Commands:\n"
                 "   - /save - Save the chat history\n"
                 "   - /clear - Clear the screen and chat history\n"
+                "   - /insert - Insert multiline text (end with END on new line)\n"
                 "❌ Type 'exit', 'quit', or press Ctrl+C to end the session",
                 title="[bold white]Chat Session[/bold white]",
                 border_style="cyan",
@@ -805,6 +806,7 @@ class AIChat:
                                     "💾 Commands:\n"
                                     "   - /save - Save the chat history\n"
                                     "   - /clear - Clear the screen and chat history\n"
+                                    "   - /insert - Insert multiline text (end with END on new line)\n"
                                     "❌ Type 'exit', 'quit', or press Ctrl+C to end the session",
                                     title="[bold white]Chat Session[/bold white]",
                                     border_style="cyan",
@@ -813,6 +815,44 @@ class AIChat:
                             )
                             self.console.print("[bold green]Screen and chat history cleared![/bold green]")
                             continue
+                        elif command == '/insert':
+                            # Clear screen for better visibility
+                            os.system('cls' if os.name == 'nt' else 'clear')
+                            
+                            # Show instructions for multiline input
+                            self.console.print(
+                                Panel(
+                                    "[bold cyan]Enter your text below:[/bold cyan]\n"
+                                    "• You can paste multiple lines of text\n"
+                                    "• Press [bold]Enter[/bold] twice to start a new line\n"
+                                    "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                                    "• Type [bold]CANCEL[/bold] on a new line to cancel",
+                                    title="[bold white]Multiline Input[/bold white]",
+                                    border_style="cyan"
+                                )
+                            )
+                            
+                            # Collect multiline input
+                            content_lines = []
+                            try:
+                                while True:
+                                    line = input()
+                                    if line.strip().upper() == 'END':
+                                        break
+                                    if line.strip().upper() == 'CANCEL':
+                                        content_lines = []
+                                        break
+                                    content_lines.append(line)
+                            except KeyboardInterrupt:
+                                self.console.print("\n[yellow]Input cancelled[/yellow]")
+                                continue
+                            
+                            # Process the input
+                            if content_lines:
+                                user_input = '\n'.join(content_lines)
+                            else:
+                                self.console.print("[yellow]No content provided, input cancelled[/yellow]")
+                                continue
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
