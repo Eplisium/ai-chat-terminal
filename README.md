@@ -141,7 +141,7 @@ Chat histories are automatically saved in both JSON and text formats, organized 
   - Timestamps for each message
 
 ### Usage Video
-![Video](https://www.dropbox.com/scl/fi/9lx7v34zfnghhh8fzt2k4/Screen-Recording-2024-12-06-095730.mp4?rlkey=gyd1glz7rkwv6cnrr3j2u7maf&st=mer3ajni&dl=0)
+[Video](https://www.dropbox.com/scl/fi/9lx7v34zfnghhh8fzt2k4/Screen-Recording-2024-12-06-095730.mp4?rlkey=gyd1glz7rkwv6cnrr3j2u7maf&st=mer3ajni&dl=0)
 
 ## License
 
