@@ -797,7 +797,6 @@ class AIChat:
                         model=self.model_id,
                         messages=messages[1:],  # Skip system message for Anthropic
                         system=self.messages[0]['content'],  # Use system message separately
-                        max_tokens=4000,
                         temperature=0.7
                     )
                     ai_response = response.content[0].text
@@ -809,7 +808,6 @@ class AIChat:
                         json={
                             "model": self.model_id,
                             "messages": messages,
-                            "max_tokens": 4000,
                             "temperature": 0.7,
                             "stream": False
                         }
@@ -822,7 +820,6 @@ class AIChat:
                     response = self.client.chat.completions.create(
                         model=self.model_id,
                         messages=messages,
-                        max_tokens=4000,
                         temperature=0.7,
                         stream=False
                     )
@@ -1963,6 +1960,31 @@ class AIChatApp:
             if answer['setting'] == "codebase":
                 self.settings_manager.manage_codebase_settings()
 
+    def manage_ai_settings(self):
+        """Display AI settings management menu"""
+        while True:
+            choices = [
+                ("=== AI Settings ===", None),
+                ("🤖 System Instructions", "instructions"),
+                # Future AI settings can be added here
+                ("Back to Main Menu", "back")
+            ]
+
+            questions = [
+                inquirer.List('setting',
+                    message="Select AI setting to configure",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['setting'] == "back":
+                break
+
+            if answer['setting'] == "instructions":
+                self.manage_instructions()
+
     def display_main_menu(self):
         """
         Display the main menu for model selection
@@ -2031,7 +2053,7 @@ class AIChatApp:
                 # Add remaining menu items with enhanced formatting
                 main_choices.extend([
                     ("═══ System Settings ═══", None),
-                    ("⚙️ System Instructions  〈Configure AI Behavior〉", "instructions"),
+                    ("⚙️ AI Settings       〈Configure AI Behavior〉", "ai_settings"),
                     ("⚙️ Application Settings 〈Configure App Behavior〉", "settings"),
                     ("═══ Application ═══", None),
                     ("✖ Exit Application    〈Close ACT〉", "exit")
@@ -2084,6 +2106,9 @@ class AIChatApp:
                     continue
                 elif selected_provider == "favorites":
                     self.manage_favorites()
+                    continue
+                elif selected_provider == "ai_settings":
+                    self.manage_ai_settings()
                     continue
 
                 # Handle provider selection
