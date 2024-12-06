@@ -141,4 +141,4 @@ Chat histories are automatically saved in both JSON and text formats, organized 
 
 ## License
 
-MIT License - See LICENSE file for details 
+ACT Community License - See LICENSE file for details 
