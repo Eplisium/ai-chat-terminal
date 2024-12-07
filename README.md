@@ -1,4 +1,5 @@
 # ACT (AI Chat Terminal)
+![Main menu](https://github.com/user-attachments/assets/cf6ca3b2-b153-4791-ad0d-6b5abe0ecde6)
 
 A versatile command-line chat interface that supports multiple AI providers including OpenAI, Anthropic, and OpenRouter, featuring rich text formatting and comprehensive file handling capabilities.
 
@@ -138,6 +139,9 @@ Chat histories are automatically saved in both JSON and text formats, organized 
   - System instructions used
   - Model configuration
   - Timestamps for each message
+
+### Usage Video
+[Video](https://www.dropbox.com/scl/fi/9lx7v34zfnghhh8fzt2k4/Screen-Recording-2024-12-06-095730.mp4?rlkey=gyd1glz7rkwv6cnrr3j2u7maf&st=mer3ajni&dl=0)
 
 ## License
 
