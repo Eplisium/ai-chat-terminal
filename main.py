@@ -1070,8 +1070,7 @@ class AIChat:
                             self.console.print("[bold green]Screen and chat history cleared![/bold green]")
                             continue
                         elif command == '/insert':
-                            # Clear screen for better visibility
-                            os.system('cls' if os.name == 'nt' else 'clear')
+                            
                             
                             # Show instructions for multiline input
                             self.console.print(
