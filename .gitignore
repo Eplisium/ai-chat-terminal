@@ -43,3 +43,4 @@ chats/
 # Project specific
 favorites.json
 system_instructions.json
+settings.json
