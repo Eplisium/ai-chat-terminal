@@ -345,10 +345,14 @@ class SystemInstructionsManager:
 # Add HTTP headers helper
 def get_openrouter_headers(api_key):
     """Get required headers for OpenRouter API"""
+    # Mask API key for logging
+    masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+    logging.getLogger("ACT").debug(f"Setting up OpenRouter headers with API key: {masked_key}")
+    
     return {
         "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": "https://github.com/eplisium",  # Replace with your actual site
-        "X-Title": "ACT",  # Replace with your app name
+        "HTTP-Referer": "https://github.com/eplisium",
+        "X-Title": "ACT",
         "Content-Type": "application/json"
     }
 
@@ -363,27 +367,56 @@ def setup_logging():
     logs_dir = 'logs'
     os.makedirs(logs_dir, exist_ok=True)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[
-            RichHandler(
-                rich_tracebacks=True, 
-                console=console, 
-                show_path=False,
-                omit_repeated_times=False
-            ),
-            RotatingFileHandler(
-                os.path.join(logs_dir, f'act_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
-                maxBytes=10*1024*1024,
-                backupCount=5,
-                encoding='utf-8'
-            )
-        ]
-    )
+    # Define log format with more details
+    log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+    detailed_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(filename)s:%(lineno)d | %(message)s"
 
-    return logging.getLogger("ACT"), console
+    # Create formatters
+    file_formatter = logging.Formatter(detailed_format, datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Create rotating file handler for general logs
+    file_handler = RotatingFileHandler(
+        os.path.join(logs_dir, f'act_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.DEBUG)  # File shows DEBUG and above
+
+    # Create error file handler for error-only logs
+    error_handler = RotatingFileHandler(
+        os.path.join(logs_dir, f'act_error_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    error_handler.setFormatter(file_formatter)
+    error_handler.setLevel(logging.ERROR)  # Only ERROR and CRITICAL
+
+    # Create null handler for console to suppress output
+    null_handler = logging.NullHandler()
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+    root_logger.addHandler(null_handler)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(error_handler)
+
+    # Create ACT logger as a child of root logger
+    logger = logging.getLogger("ACT")
+    
+    # Log system information at startup (only to files)
+    logger.info("="*80)
+    logger.info("ACT - AI Chat Terminal Starting")
+    logger.info("-"*80)
+    logger.info(f"Python Version: {sys.version}")
+    logger.info(f"Operating System: {os.name} - {sys.platform}")
+    logger.info(f"Log Directory: {os.path.abspath(logs_dir)}")
+    logger.info("="*80)
+
+    return logger, console
 
 def sanitize_path(path):
     """
@@ -670,6 +703,10 @@ class AIChat:
         """
         self.provider = model_config.get('provider', 'openai').lower()
         
+        def mask_key(key):
+            """Helper to mask API key for logging"""
+            return f"{key[:4]}...{key[-4:]}" if len(key) > 8 else "***"
+        
         if self.provider == 'openrouter':
             if not OPENROUTER_AVAILABLE:
                 raise ImportError("OpenRouter library not installed. Please install 'openai'.")
@@ -679,6 +716,7 @@ class AIChat:
                 self.logger.error("OpenRouter API key not found")
                 raise ValueError("OpenRouter API key not found in .env file")
             
+            self.logger.debug(f"Initializing OpenRouter client with API key: {mask_key(self.api_key)}")
             self.api_base = "https://openrouter.ai/api/v1"
         
         elif self.provider == 'anthropic':
@@ -690,6 +728,7 @@ class AIChat:
                 self.logger.error("Anthropic API key not found")
                 raise ValueError("Anthropic API key not found in .env file")
             
+            self.logger.debug(f"Initializing Anthropic client with API key: {mask_key(api_key)}")
             self.client = Anthropic(api_key=api_key)
         
         else:  # openai
@@ -701,6 +740,7 @@ class AIChat:
                 self.logger.error("OpenAI API key not found")
                 raise ValueError("OpenAI API key not found in .env file")
             
+            self.logger.debug(f"Initializing OpenAI client with API key: {mask_key(api_key)}")
             self.client = OpenAI(api_key=api_key)
 
     def send_message(self, user_input):
@@ -792,16 +832,33 @@ class AIChat:
             
             try:
                 if self.provider == 'anthropic':
-                    # Anthropic API call
+                    # Convert messages to Anthropic format
+                    anthropic_messages = []
+                    for msg in messages[1:]:  # Skip system message
+                        if isinstance(msg["content"], list):
+                            # Handle multimodal content
+                            anthropic_messages.append({
+                                "role": "user" if msg["role"] == "user" else "assistant",
+                                "content": msg["content"]
+                            })
+                        else:
+                            anthropic_messages.append({
+                                "role": "user" if msg["role"] == "user" else "assistant",
+                                "content": msg["content"]
+                            })
+
+                    # Anthropic API call with max tokens
                     response = self.client.messages.create(
                         model=self.model_id,
-                        messages=messages[1:],  # Skip system message for Anthropic
-                        system=self.messages[0]['content'],  # Use system message separately
+                        messages=anthropic_messages,
+                        system=self.messages[0]['content'],
+                        max_tokens=4096,  # Maximum tokens for most Claude models
                         temperature=0.7
                     )
                     ai_response = response.content[0].text
+
                 elif self.provider == 'openrouter':
-                    # OpenRouter API call
+                    # OpenRouter API call with max tokens
                     response = requests.post(
                         f"{self.api_base}/chat/completions",
                         headers=get_openrouter_headers(self.api_key),
@@ -809,21 +866,25 @@ class AIChat:
                             "model": self.model_id,
                             "messages": messages,
                             "temperature": 0.7,
+                            "max_tokens": 4096,  # Maximum tokens
                             "stream": False
                         }
                     )
                     response.raise_for_status()
                     data = response.json()
                     ai_response = data['choices'][0]['message']['content'].strip()
+
                 else:
-                    # OpenAI API call
+                    # OpenAI API call with max tokens
                     response = self.client.chat.completions.create(
                         model=self.model_id,
                         messages=messages,
                         temperature=0.7,
+                        max_tokens=4096,  # Maximum tokens for most GPT models
                         stream=False
                     )
                     ai_response = response.choices[0].message.content.strip()
+
             finally:
                 thinking_message.stop()
             
