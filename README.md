@@ -22,6 +22,7 @@ A versatile command-line chat interface that supports multiple AI providers incl
 
 ### Chat Features
 - Interactive chat interface with rich text formatting
+- Active system instruction display in chat responses
 - File and directory reference system:
   - View file contents: `[[file:path/to/file]]`
   - List directory contents: `[[dir:path/to/directory]]`
@@ -31,7 +32,7 @@ A versatile command-line chat interface that supports multiple AI providers incl
   - URL images: `[[img:https://example.com/image.jpg]]`
   - Automatic format detection and conversion
 - Chat session management:
-  - Save chat history (`/save`)
+  - Save chat history with optional custom name (`/save [name]`)
   - Clear screen and history (`/clear`)
   - Insert multiline text (`/insert`)
   - End chat session (`/end`)
@@ -111,7 +112,7 @@ The interactive menu provides:
 
 ### Chat Commands
 During chat sessions:
-- `/save` - Save the current chat history (JSON and text formats)
+- `/save [name]` - Save the current chat history with optional custom name
 - `/clear` - Clear screen and reset chat history
 - `/insert` - Insert multiline text (end with END on new line)
 - `/end` - End the chat session
@@ -133,12 +134,13 @@ Chat histories are automatically saved in both JSON and text formats, organized 
 - Provider (OpenAI, Anthropic, OpenRouter)
 - Model company (for OpenRouter)
 - Model name
-- Timestamp
+- Custom name (if provided) with timestamp
 - Includes:
   - Full conversation history
   - System instructions used
   - Model configuration
   - Timestamps for each message
+  - Custom chat name (when specified)
 
 ### Usage Video
 [Video](https://www.dropbox.com/scl/fi/9lx7v34zfnghhh8fzt2k4/Screen-Recording-2024-12-06-095730.mp4?rlkey=gyd1glz7rkwv6cnrr3j2u7maf&st=mer3ajni&dl=0)
