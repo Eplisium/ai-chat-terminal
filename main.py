@@ -826,6 +826,8 @@ class AIChat:
             
             # Add processed message to conversation history
             messages.append(current_message)
+            # Also add to main message history
+            self.messages.append(current_message)
             
             # Show thinking message
             thinking_message = self.console.status(f"[bold yellow]{self.model_name} is thinking...[/bold yellow]")
@@ -1020,38 +1022,45 @@ class AIChat:
                     role = msg['role'].upper()
                     content = msg['content']
                     
-                    # Format role header
+                    # Format role header with proper spacing
                     if role == "USER":
-                        f.write("YOU:\n")
+                        f.write("\nYOU:\n" + "-"*40 + "\n")
                     else:
-                        f.write(f"{self.model_name}:\n")
+                        f.write(f"\n{self.model_name}:\n" + "-"*40 + "\n")
                     
                     # Write message content with proper formatting
-                    lines = content.split('\n')
-                    in_code_block = False
-                    for line in lines:
-                        if line.startswith('```'):
-                            if in_code_block:
-                                # End code block
-                                f.write("-"*80 + "\n")
-                                in_code_block = False
+                    if isinstance(content, list):  # Handle multimodal content
+                        for item in content:
+                            if item['type'] == 'text':
+                                f.write(item['text'] + "\n")
+                            elif item['type'] in ['image', 'image_url']:
+                                f.write("[Image embedded]\n")
+                    else:
+                        lines = content.split('\n')
+                        in_code_block = False
+                        for line in lines:
+                            if line.startswith('```'):
+                                if in_code_block:
+                                    # End code block
+                                    f.write("-"*80 + "\n")
+                                    in_code_block = False
+                                else:
+                                    # Start code block
+                                    f.write("-"*80 + "\n")
+                                    # Get language if specified
+                                    lang = line[3:].strip()
+                                    if lang:
+                                        f.write(f"Code ({lang}):\n")
+                                    in_code_block = True
                             else:
-                                # Start code block
-                                f.write("-"*80 + "\n")
-                                # Get language if specified
-                                lang = line[3:].strip()
-                                if lang:
-                                    f.write(f"Code ({lang}):\n")
-                                in_code_block = True
-                        else:
-                            if in_code_block:
-                                # Indent code
-                                f.write("    " + line + "\n")
-                            else:
-                                f.write(line + "\n")
+                                if in_code_block:
+                                    # Indent code
+                                    f.write("    " + line + "\n")
+                                else:
+                                    f.write(line + "\n")
                     
                     # Add spacing between messages
-                    f.write("\n" + "-"*40 + "\n\n")
+                    f.write("\n")
 
             self.console.print(f"[green]Chat saved to:[/green]")
             self.console.print(f"[blue]JSON: {json_filepath}[/blue]")
