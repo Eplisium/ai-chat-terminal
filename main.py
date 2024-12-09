@@ -678,8 +678,9 @@ class AIChat:
         self.provider = model_config.get('provider', 'openai')
         self.start_time = datetime.now()  # Add start time for chat
         
-        # Initialize settings manager
+        # Initialize settings manager and system instructions manager
         self.settings_manager = SettingsManager(logger, console)
+        self.instructions_manager = SystemInstructionsManager(logger, console)
 
         # Initialize client based on provider
         self._setup_client(model_config)
@@ -942,12 +943,15 @@ class AIChat:
         
         # Join all sections with proper spacing
         final_text = '\n'.join(formatted_text)
+
+        # Get the current system instruction name
+        current_instruction_name = self.instructions_manager.get_current_name()
         
         # Create a single panel with the entire formatted content
         self.console.print(
             Panel(
                 Markdown(final_text),
-                title=f"[bold #A6E22E]{self.model_name}[/]",
+                title=f"[bold #A6E22E]{self.model_name}[/] [dim]({current_instruction_name})[/]",
                 border_style="bright_blue",
                 padding=(1, 2),
                 expand=True,
@@ -955,7 +959,7 @@ class AIChat:
             )
         )
     
-    def save_chat(self):
+    def save_chat(self, custom_name=None):
         """Save the chat conversation to both JSON and text files"""
         try:
             # Create base chats directory
@@ -979,7 +983,12 @@ class AIChat:
             os.makedirs(chat_dir, exist_ok=True)
 
             # Base filename without extension
-            base_filename = f"chat_{timestamp}"
+            if custom_name:
+                # Sanitize custom name and combine with timestamp
+                custom_name = sanitize_path(custom_name)
+                base_filename = f"{custom_name}_{timestamp}"
+            else:
+                base_filename = f"chat_{timestamp}"
             
             # Save JSON format
             json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
@@ -999,6 +1008,8 @@ class AIChat:
                 # Write header
                 f.write("="*80 + "\n")
                 f.write(f"Chat with {self.model_name}\n")
+                if custom_name:
+                    f.write(f"Chat Name: {custom_name}\n")
                 f.write(f"Model ID: {self.model_id}\n")
                 f.write(f"Provider: {self.provider}\n")
                 f.write(f"Date: {self.start_time.strftime('%Y-%m-%d %I:%M:%S %p')}\n")
@@ -1076,7 +1087,7 @@ class AIChat:
             '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
             '   [[ img:https://...]]          - Include image from URL\n'
             "💾 Commands:\n"
-            "   - /save - Save the chat history\n"
+            "   - /save [name] - Save the chat history (optional custom name)\n"
             "   - /clear - Clear the screen and chat history\n"
             "   - /insert - Insert multiline text (end with END on new line)\n"
             "   - /end - End the chat session\n"
@@ -1104,13 +1115,22 @@ class AIChat:
 
                     # Handle commands
                     if user_input.startswith('/'):
-                        command = user_input.lower().strip()
+                        command_parts = user_input.strip().split(maxsplit=1)
+                        command = command_parts[0].lower()
+                        command_args = command_parts[1] if len(command_parts) > 1 else None
+
                         if command == '/save':
                             if len(self.messages) > 1:
-                                if self.save_chat():
-                                    self.console.print("[bold green]Chat history saved successfully![/bold green]")
+                                if command_args:
+                                    if self.save_chat(command_args):
+                                        self.console.print("[bold green]Chat history saved successfully with custom name![/bold green]")
+                                    else:
+                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
                                 else:
-                                    self.console.print("[bold red]Failed to save chat history.[/bold red]")
+                                    if self.save_chat():
+                                        self.console.print("[bold green]Chat history saved successfully![/bold green]")
+                                    else:
+                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
                             else:
                                 self.console.print("[yellow]No messages to save yet.[/yellow]")
                             continue
