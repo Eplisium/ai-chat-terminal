@@ -397,7 +397,7 @@ def setup_logging():
 
     # Create response logger for API responses
     response_handler = RotatingFileHandler(
-        os.path.join(logs_dir, 'responses.log'),
+        os.path.join(logs_dir, f'act_responses_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
         maxBytes=50*1024*1024,  # 50MB
         backupCount=10,
         encoding='utf-8'
