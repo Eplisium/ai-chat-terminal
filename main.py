@@ -19,6 +19,7 @@ from rich.syntax import Syntax
 from urllib.parse import urlparse
 from io import BytesIO
 from PIL import Image
+import pprint
 
 # Document handling imports
 try:
@@ -394,6 +395,24 @@ def setup_logging():
     error_handler.setFormatter(file_formatter)
     error_handler.setLevel(logging.ERROR)  # Only ERROR and CRITICAL
 
+    # Create response logger for API responses
+    response_handler = RotatingFileHandler(
+        os.path.join(logs_dir, 'responses.log'),
+        maxBytes=50*1024*1024,  # 50MB
+        backupCount=10,
+        encoding='utf-8'
+    )
+    response_handler.setFormatter(file_formatter)
+    response_handler.setLevel(logging.INFO)
+
+    # Create response logger
+    response_logger = logging.getLogger("ACT.responses")
+    response_logger.setLevel(logging.INFO)
+    response_logger.addHandler(response_handler)
+    
+    # Ensure the response logger doesn't propagate to root logger
+    response_logger.propagate = False
+
     # Create null handler for console to suppress output
     null_handler = logging.NullHandler()
 
@@ -407,6 +426,9 @@ def setup_logging():
     # Create ACT logger as a child of root logger
     logger = logging.getLogger("ACT")
     
+    # Test response logger
+    response_logger.info("Response logging initialized")
+    
     # Log system information at startup (only to files)
     logger.info("="*80)
     logger.info("ACT - AI Chat Terminal Starting")
@@ -417,6 +439,104 @@ def setup_logging():
     logger.info("="*80)
 
     return logger, console
+
+def log_api_response(provider, request_data, response_data, error=None):
+    """
+    Log API request and response data
+    
+    Args:
+        provider (str): API provider name
+        request_data (dict): Request data sent to API
+        response_data (dict/object): Response data from API
+        error (Exception, optional): Error if request failed
+    """
+    response_logger = logging.getLogger("ACT.responses")
+    
+    # Debug statement to verify logger is working
+    response_logger.debug(f"Logging response from {provider}")
+    
+    # Create a pretty printer for formatting
+    pp = pprint.PrettyPrinter(indent=2)
+    
+    # Start log entry
+    log_entry = [
+        "="*80,
+        f"API CALL: {provider}",
+        f"TIMESTAMP: {datetime.now().isoformat()}",
+        "-"*80,
+        "REQUEST:",
+        pp.pformat(request_data),
+        "-"*80,
+        "RESPONSE:"
+    ]
+    
+    # Format response based on provider and type
+    if error:
+        log_entry.append("ERROR:")
+        log_entry.append(str(error))
+    else:
+        if provider == "OpenRouter":
+            # OpenRouter returns JSON response
+            log_entry.append(pp.pformat(response_data))
+        elif provider == "OpenAI":
+            # OpenAI response object needs special handling
+            try:
+                response_dict = {
+                    "id": response_data.id,
+                    "model": response_data.model,
+                    "choices": [
+                        {
+                            "index": c.index,
+                            "message": {
+                                "role": c.message.role,
+                                "content": c.message.content
+                            },
+                            "finish_reason": c.finish_reason
+                        } for c in response_data.choices
+                    ],
+                    "usage": {
+                        "prompt_tokens": response_data.usage.prompt_tokens,
+                        "completion_tokens": response_data.usage.completion_tokens,
+                        "total_tokens": response_data.usage.total_tokens
+                    }
+                }
+                log_entry.append(pp.pformat(response_dict))
+            except Exception as e:
+                log_entry.append(f"Error formatting OpenAI response: {str(e)}")
+                log_entry.append(str(response_data))
+        elif provider == "Anthropic":
+            # Anthropic response object needs special handling
+            try:
+                response_dict = {
+                    "id": response_data.id,
+                    "type": response_data.type,
+                    "role": response_data.role,
+                    "content": [
+                        {"type": c.type, "text": c.text}
+                        for c in response_data.content
+                    ],
+                    "model": response_data.model,
+                    "stop_reason": response_data.stop_reason,
+                    "stop_sequence": response_data.stop_sequence,
+                    "usage": {
+                        "input_tokens": response_data.usage.input_tokens,
+                        "output_tokens": response_data.usage.output_tokens
+                    }
+                }
+                log_entry.append(pp.pformat(response_dict))
+            except Exception as e:
+                log_entry.append(f"Error formatting Anthropic response: {str(e)}")
+                log_entry.append(str(response_data))
+    
+    # Add end marker
+    log_entry.append("="*80 + "\n")
+    
+    # Join all lines and log
+    full_entry = "\n".join(log_entry)
+    response_logger.info(full_entry)
+    
+    # Debug statement to verify logging completed
+    response_logger.debug(f"Finished logging response from {provider}")
 
 def sanitize_path(path):
     """
@@ -850,44 +970,69 @@ class AIChat:
                                 "content": msg["content"]
                             })
 
+                    # Prepare request data
+                    request_data = {
+                        "model": self.model_id,
+                        "messages": anthropic_messages,
+                        "system": self.messages[0]['content'],
+                        "max_tokens": 4096,
+                        "temperature": 0.7
+                    }
+
                     # Anthropic API call with max tokens
-                    response = self.client.messages.create(
-                        model=self.model_id,
-                        messages=anthropic_messages,
-                        system=self.messages[0]['content'],
-                        max_tokens=4096,  # Maximum tokens for most Claude models
-                        temperature=0.7
-                    )
+                    response = self.client.messages.create(**request_data)
+                    
+                    # Log the API response
+                    log_api_response("Anthropic", request_data, response)
+                    
                     ai_response = response.content[0].text
 
                 elif self.provider == 'openrouter':
-                    # OpenRouter API call with max tokens
+                    # Prepare request data
+                    request_data = {
+                        "model": self.model_id,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "max_tokens": 4096,
+                        "stream": False
+                    }
+
+                    # OpenRouter API call
                     response = requests.post(
                         f"{self.api_base}/chat/completions",
                         headers=get_openrouter_headers(self.api_key),
-                        json={
-                            "model": self.model_id,
-                            "messages": messages,
-                            "temperature": 0.7,
-                            "max_tokens": 4096,  # Maximum tokens
-                            "stream": False
-                        }
+                        json=request_data
                     )
                     response.raise_for_status()
                     data = response.json()
+                    
+                    # Log the API response
+                    log_api_response("OpenRouter", request_data, data)
+                    
                     ai_response = data['choices'][0]['message']['content'].strip()
 
-                else:
-                    # OpenAI API call with max tokens
-                    response = self.client.chat.completions.create(
-                        model=self.model_id,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=4096,  # Maximum tokens for most GPT models
-                        stream=False
-                    )
+                else:  # OpenAI
+                    # Prepare request data
+                    request_data = {
+                        "model": self.model_id,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "max_tokens": 4096,
+                        "stream": False
+                    }
+
+                    # OpenAI API call
+                    response = self.client.chat.completions.create(**request_data)
+                    
+                    # Log the API response
+                    log_api_response("OpenAI", request_data, response)
+                    
                     ai_response = response.choices[0].message.content.strip()
 
+            except Exception as e:
+                # Log the error
+                log_api_response(self.provider, request_data, None, error=e)
+                raise
             finally:
                 thinking_message.stop()
             
