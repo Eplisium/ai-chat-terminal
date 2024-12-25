@@ -643,6 +643,7 @@ class AIChat:
                 '   [[ img:"path/to/image.png"]]  - Paths with spaces need quotes\n'
                 '   [[ img:https://...]]          - Include image from URL\n'
                 "💾 Commands:\n"
+                "   - /help - Display detailed help guide\n"
                 "   - /save [name] - Save the chat history (optional custom name)\n"
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
@@ -780,6 +781,9 @@ class AIChat:
                             self.logger.info("Chat session ended by user (/end command)")
                             exit_chat("Chat session ended. Thanks for using ACT!")
                             break
+                        elif command == '/help':
+                            self._display_help()
+                            continue
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
@@ -801,3 +805,43 @@ class AIChat:
             self.logger.error(f"Fatal error in chat loop: {e}", exc_info=True)
             self.console.print(f"[bold red]Fatal error: {e}[/bold red]")
             exit_chat("Exiting due to error. Sorry for the inconvenience!") 
+
+    def _display_help(self):
+        """Display detailed help information"""
+        help_text = (
+            "[bold cyan]Available Commands:[/bold cyan]\n"
+            "  [bold yellow]/help[/bold yellow]    - Display this help message\n"
+            "  [bold yellow]/save[/bold yellow]    - Save chat history\n"
+            "             Usage: /save [optional_name]\n"
+            "  [bold yellow]/clear[/bold yellow]   - Clear screen and chat history\n"
+            "  [bold yellow]/insert[/bold yellow]  - Enter multiline text\n"
+            "             Type END to finish, CANCEL to abort\n"
+            "  [bold yellow]/end[/bold yellow]     - End chat session\n\n"
+            "[bold cyan]File & Directory References:[/bold cyan]\n"
+            "  [bold yellow][[ file:path/to/file]][/bold yellow]\n"
+            "    - View contents of a file\n"
+            "    - Example: [[ file:example.py]] or [[ file:\"path with spaces.txt\"]]\n\n"
+            "  [bold yellow][[ dir:path/to/directory]][/bold yellow]\n"
+            "    - List contents of a directory\n"
+            "    - Example: [[ dir:src]] or [[ dir:\"path with spaces\"]]\n\n"
+            "  [bold yellow][[ codebase:path]][/bold yellow]\n"
+            "    - View all code files in directory\n"
+            "    - Example: [[ codebase:src/*.py]]\n\n"
+            "[bold cyan]Image References:[/bold cyan]\n"
+            "  [bold yellow][[ img:path/to/image]][/bold yellow]\n"
+            "    - Include local image or URL\n"
+            "    - Example: [[ img:image.jpg]] or [[ img:\"path with spaces.png\"]]\n"
+            "    - Example: [[ img:https://example.com/image.jpg]]\n\n"
+            "[bold cyan]Quick Exit:[/bold cyan]\n"
+            "  Type 'exit', 'quit', or 'bye' to end the session\n"
+            "  Press Ctrl+C to interrupt at any time"
+        )
+        
+        self.console.print(
+            Panel(
+                help_text,
+                title="[bold white]📚 ACT Help Guide[/bold white]",
+                border_style="cyan",
+                padding=(1, 2)
+            )
+        ) 
