@@ -48,8 +48,8 @@
 - **Provider Support**
   | Provider | Agent Support | Mode |
   |----------|--------------|------|
-  | OpenAI | ✅ | Full functionality |
-  | OpenRouter | ✅ | Embedding only |
+  | OpenRouter | ✅ | Full functionality |
+  | OpenAI | ✅ | Embedding only |
   | Anthropic | ❌ | Unsupported |
 
 ### 📄 Document Support
