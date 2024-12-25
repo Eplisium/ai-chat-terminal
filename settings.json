@@ -51,6 +51,7 @@
     },
     "appearance": {
         "ai_name_color": "#800080",
-        "instruction_name_color": "#00FFFF"
+        "instruction_name_color": "#00FFFF",
+        "cost_color": "#5DA15B"
     }
 }

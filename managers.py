@@ -20,7 +20,8 @@ class SettingsManager:
             },
             'appearance': {
                 'ai_name_color': '#A6E22E',  # Default lime green
-                'instruction_name_color': '#FFD700'  # Default gold
+                'instruction_name_color': '#FFD700',  # Default gold
+                'cost_color': '#00FFFF'  # Default cyan
             }
         }
         
@@ -80,7 +81,8 @@ class SettingsManager:
                 if not appearance_settings:
                     appearance_settings = {
                         'ai_name_color': '#A6E22E',
-                        'instruction_name_color': '#FFD700'
+                        'instruction_name_color': '#FFD700',
+                        'cost_color': '#00FFFF'
                     }
                     self.settings['appearance'] = appearance_settings
                     self._save_settings()
@@ -89,6 +91,7 @@ class SettingsManager:
                     ("=== Appearance Settings ===", None),
                     (f"AI Name Color: {appearance_settings.get('ai_name_color', '#A6E22E')}", "ai_color"),
                     (f"Instruction Name Color: {appearance_settings.get('instruction_name_color', '#FFD700')}", "instruction_color"),
+                    (f"Cost Information Color: {appearance_settings.get('cost_color', '#00FFFF')}", "cost_color"),
                     ("Back to Settings Menu", "back")
                 ]
 
@@ -104,7 +107,7 @@ class SettingsManager:
                 if not answer or answer['action'] == "back":
                     break
 
-                if answer['action'] in ["ai_color", "instruction_color"]:
+                if answer['action'] in ["ai_color", "instruction_color", "cost_color"]:
                     color_choices = [
                         ("Lime Green (#A6E22E)", "#A6E22E"),
                         ("Gold (#FFD700)", "#FFD700"),
@@ -154,7 +157,12 @@ class SettingsManager:
                         ]
                         
                         if inquirer.prompt(confirm)['confirm']:
-                            setting_key = 'ai_name_color' if answer['action'] == "ai_color" else 'instruction_name_color'
+                            setting_key = {
+                                "ai_color": "ai_name_color",
+                                "instruction_color": "instruction_name_color",
+                                "cost_color": "cost_color"
+                            }[answer['action']]
+                            
                             if 'appearance' not in self.settings:
                                 self.settings['appearance'] = {}
                             self.settings['appearance'][setting_key] = color

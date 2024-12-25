@@ -414,6 +414,56 @@ class AIChat:
                     
                     log_api_response("OpenRouter", request_data, data)
                     ai_response = data['choices'][0]['message']['content'].strip()
+                    
+                    # Get the generation ID from the response
+                    generation_id = data.get('id')
+                    if generation_id:
+                        # Add a small delay to ensure cost data is available
+                        time.sleep(0.5)
+                        
+                        # Try multiple times to get the cost data
+                        max_retries = 3
+                        retry_delay = 0.5
+                        
+                        for attempt in range(max_retries):
+                            try:
+                                generation_response = requests.get(
+                                    f"{self.api_base}/generation?id={generation_id}",
+                                    headers=get_openrouter_headers(self.api_key)
+                                )
+                                generation_response.raise_for_status()
+                                generation_data = generation_response.json()
+                                
+                                if 'data' in generation_data and generation_data['data'].get('total_cost') is not None:
+                                    # Store the accurate cost information
+                                    self.last_total_cost = generation_data['data']['total_cost']
+                                    self.last_tokens_prompt = generation_data['data'].get('tokens_prompt', 0)
+                                    self.last_tokens_completion = generation_data['data'].get('tokens_completion', 0)
+                                    self.last_native_tokens_prompt = generation_data['data'].get('native_tokens_prompt', 0)
+                                    self.last_native_tokens_completion = generation_data['data'].get('native_tokens_completion', 0)
+                                    break
+                                else:
+                                    if attempt < max_retries - 1:
+                                        time.sleep(retry_delay)
+                                        continue
+                                    else:
+                                        # If we still don't have cost data, try to calculate from usage
+                                        if 'usage' in data:
+                                            usage = data['usage']
+                                            self.last_tokens_prompt = usage.get('prompt_tokens', 0)
+                                            self.last_tokens_completion = usage.get('completion_tokens', 0)
+                                            self.last_total_cost = 0  # We don't have accurate cost data
+                            except Exception as e:
+                                self.logger.error(f"Error fetching generation stats (attempt {attempt + 1}): {e}")
+                                if attempt < max_retries - 1:
+                                    time.sleep(retry_delay)
+                                    continue
+                                else:
+                                    self.last_total_cost = 0
+                                    if 'usage' in data:
+                                        usage = data['usage']
+                                        self.last_tokens_prompt = usage.get('prompt_tokens', 0)
+                                        self.last_tokens_completion = usage.get('completion_tokens', 0)
 
                 else:  # OpenAI
                     request_data = {
@@ -454,17 +504,20 @@ class AIChat:
                 appearance = self.settings_manager.get_setting('appearance')
                 return {
                     'ai_name': appearance.get('ai_name_color', '#A6E22E'),
-                    'instruction_name': appearance.get('instruction_name_color', '#FFD700')
+                    'instruction_name': appearance.get('instruction_name_color', '#FFD700'),
+                    'cost': appearance.get('cost_color', '#00FFFF')
                 }
             return {
                 'ai_name': '#A6E22E',  # Default lime green
-                'instruction_name': '#FFD700'  # Default gold
+                'instruction_name': '#FFD700',  # Default gold
+                'cost': '#00FFFF'  # Default cyan
             }
         except Exception as e:
             self.logger.error(f"Error getting colors: {e}")
             return {
                 'ai_name': '#A6E22E',  # Default lime green
-                'instruction_name': '#FFD700'  # Default gold
+                'instruction_name': '#FFD700',  # Default gold
+                'cost': '#00FFFF'  # Default cyan
             }
 
     def _display_response(self, response_text):
@@ -502,10 +555,32 @@ class AIChat:
         # Get colors from settings
         colors = self._get_colors()
         
+        # Create the footer with cost if it's an OpenRouter response
+        footer = None
+        if self.provider == 'openrouter' and hasattr(self, 'last_total_cost'):
+            cost_parts = []
+            if hasattr(self, 'last_total_cost'):
+                if self.last_total_cost > 0:
+                    cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
+                else:
+                    cost_parts.append("Cost: Calculating...")
+            
+            if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
+                tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
+                if hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
+                    if (self.last_native_tokens_prompt != self.last_tokens_prompt or 
+                        self.last_native_tokens_completion != self.last_tokens_completion) and \
+                        self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
+                        tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
+                cost_parts.append(tokens)
+            
+            footer = f"[bold {colors['cost']}]{' | '.join(cost_parts)}[/]"
+        
         self.console.print(
             Panel(
                 Markdown(final_text),
                 title=f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]",
+                subtitle=footer,
                 border_style="bright_blue",
                 padding=(1, 2),
                 expand=True,
