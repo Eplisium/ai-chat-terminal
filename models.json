@@ -5,6 +5,7 @@
             "id": "gpt-4o",
             "description": "High-intelligence flagship model for complex, multi-step tasks. Multimodal with text/image input.",
             "context_window": 128000,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -12,6 +13,7 @@
             "id": "gpt-4o-mini",
             "description": "Affordable and intelligent small model for fast, lightweight tasks. Multimodal with text/image input.",
             "context_window": 128000,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -19,6 +21,7 @@
             "id": "chatgpt-4o-latest",
             "description": "Continuously updated version of GPT-4o used in ChatGPT, updated with significant changes.",
             "context_window": 128000,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -26,6 +29,7 @@
             "id": "gpt-4-turbo",
             "description": "Latest GPT-4 Turbo model with vision capabilities, JSON mode, and function calling.",
             "context_window": 128000,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -33,6 +37,7 @@
             "id": "gpt-4-turbo-preview",
             "description": "Preview version of GPT-4 Turbo with improved instruction following and reduced laziness.",
             "context_window": 128000,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -40,6 +45,7 @@
             "id": "gpt-3.5-turbo",
             "description": "Fast and cost-effective model for simpler tasks, with good instruction following.",
             "context_window": 16385,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
@@ -48,6 +54,7 @@
             "alias": "claude-3-5-sonnet-latest",
             "description": "Fast and highly capable model for a wide range of tasks, with a strong understanding of images.",
             "context_window": 200000,
+            "max_tokens": 4096,
             "provider": "anthropic"
         },
         {
@@ -56,6 +63,7 @@
             "alias": "claude-3-5-haiku-latest",
             "description": "Fastest and most compact model for efficient task completion.",
             "context_window": 200000,
+            "max_tokens": 4096,
             "provider": "anthropic"
         },
         {
@@ -64,6 +72,7 @@
             "alias": "claude-3-opus-latest",
             "description": "Most powerful model for highly complex tasks, with superior performance across all capabilities.",
             "context_window": 200000,
+            "max_tokens": 4096,
             "provider": "anthropic"
         },
         {
@@ -71,6 +80,7 @@
             "id": "claude-3-sonnet-20240229",
             "description": "Fast and highly capable model for a wide range of tasks.",
             "context_window": 200000,
+            "max_tokens": 4096,
             "provider": "anthropic"
         },
         {
@@ -78,6 +88,7 @@
             "id": "claude-3-haiku-20240307",
             "description": "Fastest and most compact model in the Claude 3 series.",
             "context_window": 200000,
+            "max_tokens": 4096,
             "provider": "anthropic"
         }
     ]

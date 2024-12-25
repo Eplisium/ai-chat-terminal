@@ -92,6 +92,7 @@ class AIChat:
         self.model_id = model_config['id']
         self.model_name = model_config['name']
         self.provider = model_config.get('provider', 'openai')
+        self.max_tokens = model_config.get('max_tokens')  # Get max_tokens from config
         self.start_time = datetime.now()
         
         # Handle system instruction name and content
@@ -305,7 +306,7 @@ class AIChat:
                 
                 # Join all parts
                 current_message["content"] = '\n'.join(processed_parts)
-
+            
             # Process image references
             elif '[[img:' in user_input and ']]' in user_input:
                 content = []
@@ -384,9 +385,12 @@ class AIChat:
                         "model": self.model_id,
                         "messages": anthropic_messages,
                         "system": self.messages[0]['content'],
-                        "max_tokens": 4096,
                         "temperature": 0.7
                     }
+                    
+                    # Add max_tokens only if configured
+                    if self.max_tokens:
+                        request_data["max_tokens"] = self.max_tokens
 
                     response = self.client.messages.create(**request_data)
                     log_api_response("Anthropic", request_data, response)
@@ -397,7 +401,6 @@ class AIChat:
                         "model": self.model_id,
                         "messages": messages,
                         "temperature": 0.7,
-                        "max_tokens": 4096,
                         "stream": False
                     }
 
@@ -417,9 +420,12 @@ class AIChat:
                         "model": self.model_id,
                         "messages": messages,
                         "temperature": 0.7,
-                        "max_tokens": 4096,
                         "stream": False
                     }
+                    
+                    # Add max_tokens only if configured
+                    if self.max_tokens:
+                        request_data["max_tokens"] = self.max_tokens
 
                     response = self.client.chat.completions.create(**request_data)
                     log_api_response("OpenAI", request_data, response)
@@ -685,6 +691,19 @@ class AIChat:
                 )
             )
         
+        def exit_chat(message="Goodbye!"):
+            """Exit chat with animation"""
+            # Show goodbye message with fade effect
+            self.console.print()  # Add a blank line for spacing
+            with self.console.status("[bold cyan]👋[/bold cyan]", spinner="dots") as status:
+                time.sleep(0.5)
+                self.console.print(f"[bold cyan]{message}[/bold cyan]")
+                time.sleep(1)
+            
+            # Clear screen and show main menu
+            os.system('cls' if os.name == 'nt' else 'clear')
+            display_main_menu()
+        
         # Clear screen and show welcome message at start
         os.system('cls' if os.name == 'nt' else 'clear')
         display_welcome()
@@ -696,10 +715,7 @@ class AIChat:
                     
                     if user_input.lower() in ['exit', 'quit', 'bye']:
                         self.logger.info("Chat session ended by user")
-                        self.console.print("[bold cyan]Goodbye![/bold cyan]")
-                        # Clear screen and show main menu
-                        os.system('cls' if os.name == 'nt' else 'clear')
-                        display_main_menu()
+                        exit_chat("Thanks for chatting! See you next time!")
                         break
 
                     if user_input.startswith('/'):
@@ -762,10 +778,7 @@ class AIChat:
                                 continue
                         elif command == '/end':
                             self.logger.info("Chat session ended by user (/end command)")
-                            self.console.print("[bold cyan]Chat session ended. Goodbye![/bold cyan]")
-                            # Clear screen and show main menu
-                            os.system('cls' if os.name == 'nt' else 'clear')
-                            display_main_menu()
+                            exit_chat("Chat session ended. Thanks for using ACT!")
                             break
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
@@ -776,10 +789,8 @@ class AIChat:
                 
                 except KeyboardInterrupt:
                     self.logger.warning("Chat interrupted by user")
-                    self.console.print("\n[bold cyan]Chat interrupted. Exiting...[/bold cyan]")
-                    # Clear screen and show main menu
-                    os.system('cls' if os.name == 'nt' else 'clear')
-                    display_main_menu()
+                    self.console.print("\n")  # Add newline for cleaner output
+                    exit_chat("Chat interrupted. Thanks for using ACT!")
                     break
                 except Exception as e:
                     self.logger.error(f"Error in chat loop: {e}", exc_info=True)
@@ -789,6 +800,4 @@ class AIChat:
         except Exception as e:
             self.logger.error(f"Fatal error in chat loop: {e}", exc_info=True)
             self.console.print(f"[bold red]Fatal error: {e}[/bold red]")
-            # Clear screen and show main menu
-            os.system('cls' if os.name == 'nt' else 'clear')
-            display_main_menu() 
+            exit_chat("Exiting due to error. Sorry for the inconvenience!") 

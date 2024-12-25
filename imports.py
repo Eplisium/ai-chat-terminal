@@ -5,6 +5,7 @@ import logging
 import base64
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+import time
 import dotenv
 import rich
 from rich.console import Console
