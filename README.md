@@ -70,6 +70,47 @@ A versatile command-line chat interface that supports multiple AI providers incl
     - Instruction name color settings
     - Border and text styling options
 
+### Agent Functionality
+- Intelligent context-aware AI responses:
+  - Semantic search over codebase
+  - Automatic file indexing and embedding
+  - Context-relevant code suggestions
+  - Smart file content retrieval
+- Multiple embedding models support:
+  - text-embedding-3-small (1536 dimensions)
+  - text-embedding-3-large (3072 dimensions)
+  - text-embedding-ada-002 (1536 dimensions, legacy)
+- ChromaDB integration:
+  - Multiple vector stores support
+  - Persistent embeddings storage
+  - Fast semantic search capabilities
+  - Automatic file updates tracking
+- Configurable indexing options:
+  - Customizable file type filtering
+  - Directory exclusion patterns
+  - Maximum file size limits
+  - Auto-add file capabilities
+- Provider compatibility:
+  - Full support for OpenAI models
+  - Embedding-only mode for OpenRouter
+  - Disabled for Anthropic (unsupported)
+- Store management features:
+  - Create multiple stores
+  - Switch between stores
+  - Process directories on-demand
+  - Test search functionality
+  - Delete unused stores
+- Agent status indicators:
+  - 🟢 Active (Store selected)
+  - 🟡 Enabled (No store)
+  - ⭕ Disabled
+- Advanced settings:
+  - Embedding model selection
+  - Auto-indexing configuration
+  - File size thresholds
+  - File type management
+  - Exclusion pattern control
+
 ## Requirements
 
 - Python 3.7+
@@ -140,6 +181,37 @@ The interactive menu provides:
    - Set search depth preferences
    - Define exclusion patterns
    - Customize appearance settings
+
+### Agent Configuration
+The Agent provides context-aware capabilities through vector search:
+1. Enable the Agent:
+   - Access AI Settings from the main menu
+   - Toggle Agent status (Enabled/Disabled)
+   - Select or create a vector store
+2. Configure the store:
+   - Create a new store with custom name
+   - Process target directories for indexing
+   - Select embedding model for vectorization
+   - Configure auto-indexing behavior
+3. Manage indexed content:
+   - Set file type inclusions (.py, .js, etc.)
+   - Define exclusion patterns (node_modules, etc.)
+   - Set maximum file size limits
+   - Enable/disable auto-add for new files
+4. Test and verify:
+   - Use the test search functionality
+   - Verify relevant context retrieval
+   - Adjust settings as needed
+
+When the Agent is active:
+- OpenAI models: Full functionality with context-aware responses
+- OpenRouter models: Embedding-only mode for search
+- Anthropic models: Agent features disabled (unsupported)
+
+Status indicators in the menu show:
+- 🟢 Active: Store selected and ready
+- 🟡 Enabled: No store selected
+- ⭕ Disabled: Agent features off
 
 ### Chat Commands
 During chat sessions:
