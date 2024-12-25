@@ -48,6 +48,15 @@ try:
 except ImportError:
     RTF_AVAILABLE = False
 
+# ChromaDB and LangChain imports
+try:
+    from langchain_openai import OpenAIEmbeddings
+    from langchain_chroma import Chroma
+    import chromadb
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+
 # Conditionally import based on provider
 try:
     from openai import OpenAI

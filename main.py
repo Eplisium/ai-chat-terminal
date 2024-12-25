@@ -1,7 +1,13 @@
 from imports import *
 from utils import setup_logging
-from managers import SettingsManager, SystemInstructionsManager, DataManager
+from managers import (
+    SettingsManager,
+    SystemInstructionsManager,
+    DataManager,
+    ChromaManager
+)
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
+from typing import Dict, Any
 
 class AIChatApp:
     def __init__(self, logger, console):
@@ -9,10 +15,14 @@ class AIChatApp:
         self.logger = logger
         self.console = console
         
+        # Initialize file paths
+        self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
+        
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
         self.settings_manager = SettingsManager(logger, console)
         self.data_manager = DataManager(logger, console)
+        self.chroma_manager = ChromaManager(logger, console)
         
         # Load models from JSON
         try:
@@ -37,6 +47,15 @@ class AIChatApp:
             else:
                 self.openrouter = None
                 self.logger.warning("OpenRouter API key not found, OpenRouter models will not be available")
+            
+            # Try to load last used store
+            settings = self._load_settings()
+            last_store = settings.get('agent', {}).get('last_store')
+            if last_store:
+                if self.chroma_manager.load_store(last_store):
+                    self.logger.info(f"Loaded last used store: {last_store}")
+                else:
+                    self.logger.warning(f"Failed to load last store: {last_store}")
             
             self.logger.info(f"Loaded {len(self.models_config)} models from configuration")
         except FileNotFoundError:
@@ -463,8 +482,26 @@ class AIChatApp:
     def manage_ai_settings(self):
         """Display AI settings management menu"""
         while True:
+            settings = self._load_settings()
+            agent_enabled = settings.get('agent', {}).get('enabled', False)
+            agent_active = (
+                agent_enabled and 
+                self.chroma_manager and 
+                self.chroma_manager.vectorstore is not None and
+                self.chroma_manager.store_name is not None
+            )
+
+            # Get agent status with icons
+            if agent_active:
+                agent_status = f"🟢 Active - Store: {self.chroma_manager.store_name}"
+            elif agent_enabled:
+                agent_status = "🟡 Enabled (No Store Selected)"
+            else:
+                agent_status = "⭕ Disabled"
+
             choices = [
-                ("=== AI Settings ===", None),
+                ("═══ AI Settings ═══", None),
+                (f"🤖 Agent           〈{agent_status}〉", "agent"),
                 ("🤖 System Instructions", "instructions"),
                 ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
@@ -482,10 +519,190 @@ class AIChatApp:
             if not answer or answer['setting'] == "back":
                 break
 
-            if answer['setting'] == "instructions":
+            if answer['setting'] == "agent":
+                self.manage_agent_settings(agent_status)
+            elif answer['setting'] == "instructions":
                 self.manage_instructions()
             elif answer['setting'] == "contexts":
                 self.manage_model_contexts()
+
+    def manage_agent_settings(self, agent_status):
+        """Manage Agent settings"""
+        while True:
+            settings = self._load_settings()
+            agent_settings = settings.get('agent', {})
+            agent_enabled = agent_settings.get('enabled', False)
+            
+            current_store = "None"
+            if self.chroma_manager and self.chroma_manager.store_name:
+                current_store = self.chroma_manager.store_name
+
+            choices = [
+                ("═══ Agent Settings ═══", None),
+                (f"Current Status: {self._get_agent_status_display()}", None),
+                (f"Current Store: {current_store}", None),
+                ("Toggle Agent", "toggle"),
+            ]
+
+            if agent_enabled:
+                choices.extend([
+                    ("═══ Store Management ═══", None),
+                    ("Create New Store", "create"),
+                    ("Select Store", "select"),
+                    ("Delete Store", "delete"),
+                    ("Process Directory", "process"),
+                ])
+
+                if self.chroma_manager and self.chroma_manager.store_name:
+                    choices.extend([
+                        ("Test Search", "test"),
+                        ("Select Embedding Model", "model"),
+                    ])
+
+            choices.extend([
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ])
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage Agent Settings",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "toggle":
+                settings['agent']['enabled'] = not agent_enabled
+                # Save last used store when disabling
+                if agent_enabled and self.chroma_manager.store_name:
+                    settings['agent']['last_store'] = self.chroma_manager.store_name
+                self._save_settings(settings)
+                new_status = "enabled" if not agent_enabled else "disabled"
+                icon = "🟡" if not agent_enabled else "⭕"
+                self.console.print(f"{icon} Agent {new_status}")
+                return True  # Return True to indicate menu should be refreshed
+
+            elif answer['action'] == "create":
+                name_question = [
+                    inquirer.Text('name',
+                        message="Enter store name",
+                        validate=lambda _, x: len(x) > 0
+                    )
+                ]
+
+                name_answer = inquirer.prompt(name_question)
+                if name_answer:
+                    if self.chroma_manager.create_store(name_answer['name']):
+                        if inquirer.confirm("Would you like to process a directory now?", default=True):
+                            dir_question = [
+                                inquirer.Text('directory',
+                                    message="Enter directory path to process",
+                                    default="."
+                                )
+                            ]
+                            dir_answer = inquirer.prompt(dir_question)
+                            if dir_answer:
+                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+
+            elif answer['action'] == "select":
+                stores = self.chroma_manager.list_stores()
+                if not stores:
+                    self.console.print("[yellow]No stores available[/yellow]")
+                    continue
+
+                store_choices = [(store, store) for store in stores]
+                store_choices.append(("Back", None))
+
+                store_question = [
+                    inquirer.List('store',
+                        message="Select Store",
+                        choices=store_choices,
+                        carousel=True
+                    ),
+                ]
+
+                store_answer = inquirer.prompt(store_question)
+                if store_answer and store_answer['store']:
+                    if self.chroma_manager.load_store(store_answer['store']):
+                        if inquirer.confirm("Would you like to process a directory now?", default=False):
+                            dir_question = [
+                                inquirer.Text('directory',
+                                    message="Enter directory path to process",
+                                    default="."
+                                )
+                            ]
+                            dir_answer = inquirer.prompt(dir_question)
+                            if dir_answer:
+                                force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+
+            elif answer['action'] == "delete":
+                stores = self.chroma_manager.list_stores()
+                if not stores:
+                    self.console.print("[yellow]No stores available[/yellow]")
+                    continue
+
+                store_choices = [(store, store) for store in stores]
+                store_choices.append(("Back", None))
+
+                store_question = [
+                    inquirer.List('store',
+                        message="Select Store to Delete",
+                        choices=store_choices,
+                        carousel=True
+                    ),
+                ]
+
+                store_answer = inquirer.prompt(store_question)
+                if store_answer and store_answer['store']:
+                    confirm = inquirer.confirm(
+                        f"Are you sure you want to delete store '{store_answer['store']}'?",
+                        default=False
+                    )
+                    if confirm:
+                        if self.chroma_manager.delete_store(store_answer['store']):
+                            self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
+
+            elif answer['action'] == "process":
+                if not self.chroma_manager.store_name:
+                    self.console.print("[yellow]Please select a store first[/yellow]")
+                    continue
+
+                dir_question = [
+                    inquirer.Text('directory',
+                        message="Enter directory path to process",
+                        default="."
+                    )
+                ]
+                dir_answer = inquirer.prompt(dir_question)
+                if dir_answer:
+                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+
+            elif answer['action'] == "test":
+                query = inquirer.text(message="Enter a test query")
+                if query:
+                    self.console.print("\n[cyan]Searching for relevant context...[/cyan]")
+                    results = self.chroma_manager.search_context(query)
+                    if results:
+                        self.console.print("\n[green]Found relevant files:[/green]")
+                        for i, result in enumerate(results, 1):
+                            self.console.print(Panel(
+                                result,
+                                title=f"[bold cyan]Result {i}[/bold cyan]",
+                                border_style="cyan"
+                            ))
+                    else:
+                        self.console.print("[yellow]No relevant context found[/yellow]")
+                    self.console.input("\nPress Enter to continue...")
+
+            elif answer['action'] == "model":
+                self.chroma_manager.select_embedding_model()
 
     def manage_model_contexts(self):
         """Display and manage context window settings for models"""
@@ -571,72 +788,257 @@ class AIChatApp:
                     except Exception as e:
                         self.console.print(f"[red]Error updating settings: {e}[/red]")
 
+    def manage_file_context(self):
+        """Manage file context settings and ChromaDB stores"""
+        while True:
+            stores = self.chroma_manager.list_stores()
+            current_store = self.chroma_manager.store_name
+
+            choices = [
+                ("=== File Context Settings ===", None),
+                (f"Current Store: {current_store or 'None'}", None),
+                ("Create New Store", "create"),
+            ]
+
+            if stores:
+                choices.extend([
+                    ("Select Store", "select"),
+                    ("Delete Store", "delete"),
+                    ("Process Directory", "process"),
+                ])
+
+            if current_store:
+                choices.extend([
+                    ("Test Search", "test"),
+                ])
+
+            choices.extend([
+                ("=== Configuration ===", None),
+                ("Select Embedding Model", "model"),
+                ("=== Navigation ===", None),
+                ("Back", "back")
+            ])
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage File Context",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "create":
+                name_question = [
+                    inquirer.Text('name',
+                        message="Enter store name",
+                        validate=lambda _, x: len(x) > 0
+                    )
+                ]
+
+                name_answer = inquirer.prompt(name_question)
+                if name_answer:
+                    if self.chroma_manager.create_store(name_answer['name']):
+                        # Ask if user wants to process a directory
+                        if inquirer.confirm("Would you like to process a directory now?", default=True):
+                            dir_question = [
+                                inquirer.Text('directory',
+                                    message="Enter directory path to process",
+                                    default="."
+                                )
+                            ]
+                            dir_answer = inquirer.prompt(dir_question)
+                            if dir_answer:
+                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+                    else:
+                        self.console.print("[red]Failed to create store[/red]")
+
+            elif answer['action'] == "select" and stores:
+                store_choices = [(store, store) for store in stores]
+                store_choices.append(("Back", None))
+
+                store_question = [
+                    inquirer.List('store',
+                        message="Select Store",
+                        choices=store_choices,
+                        carousel=True
+                    ),
+                ]
+
+                store_answer = inquirer.prompt(store_question)
+                if store_answer and store_answer['store']:
+                    if self.chroma_manager.load_store(store_answer['store']):
+                        # Ask if user wants to process a directory
+                        if inquirer.confirm("Would you like to process a directory now?", default=False):
+                            dir_question = [
+                                inquirer.Text('directory',
+                                    message="Enter directory path to process",
+                                    default="."
+                                )
+                            ]
+                            dir_answer = inquirer.prompt(dir_question)
+                            if dir_answer:
+                                force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+
+            elif answer['action'] == "delete" and stores:
+                store_choices = [(store, store) for store in stores]
+                store_choices.append(("Back", None))
+
+                store_question = [
+                    inquirer.List('store',
+                        message="Select Store to Delete",
+                        choices=store_choices,
+                        carousel=True
+                    ),
+                ]
+
+                store_answer = inquirer.prompt(store_question)
+                if store_answer and store_answer['store']:
+                    confirm = inquirer.confirm(
+                        f"Are you sure you want to delete store '{store_answer['store']}'?",
+                        default=False
+                    )
+                    if confirm:
+                        if self.chroma_manager.delete_store(store_answer['store']):
+                            self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
+                        else:
+                            self.console.print("[red]Failed to delete store[/red]")
+
+            elif answer['action'] == "process" and current_store:
+                dir_question = [
+                    inquirer.Text('directory',
+                        message="Enter directory path to process",
+                        default="."
+                    )
+                ]
+                dir_answer = inquirer.prompt(dir_question)
+                if dir_answer:
+                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+
+            elif answer['action'] == "test" and current_store:
+                query = inquirer.text(message="Enter a test query")
+                if query:
+                    self.console.print("\n[cyan]Searching for relevant context...[/cyan]")
+                    results = self.chroma_manager.search_context(query)
+                    if results:
+                        self.console.print("\n[green]Found relevant files:[/green]")
+                        for i, result in enumerate(results, 1):
+                            self.console.print(Panel(
+                                result,
+                                title=f"[bold cyan]Result {i}[/bold cyan]",
+                                border_style="cyan"
+                            ))
+                    else:
+                        self.console.print("[yellow]No relevant context found[/yellow]")
+                    self.console.input("\nPress Enter to continue...")
+
+            elif answer['action'] == "model":
+                self.chroma_manager.select_embedding_model()
+
     def display_main_menu(self):
         """Display the main menu for model selection"""
         self.logger.info("Displaying main menu")
         
-        logo = """[bold cyan]
-    ╔═══╗╔═══╗╔════╗
-    ║╔═╗║║╔═╗║║╔╗╔╗║
-    ║║ ║║║║ ╚╝╚╝║║╚╝
-    ║╔═╗║║║ ╔╗  ║║  
-    ║║ ║║║╚═╝║  ║║  
-    ╚╝ ╚╝╚═══╝  ╚╝  
-[/bold cyan]"""
-        
-        welcome_text = (
-            f"{logo}\n"
-            "[bold white]Welcome to[/bold white] [bold cyan]ACT[/bold cyan] [bold white](AI Chat Terminal)[/bold white]\n\n"
-            "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n"
-            "🤖 [bold]Your Gateway to Advanced AI Conversations[/bold]\n"
-            "📝 Choose from multiple AI models and providers\n"
-            "💡 Each model offers unique capabilities\n"
-            "⚡ Powered by OpenAI, Anthropic, and OpenRouter\n"
-            "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n\n"
-            "[dim]Press Ctrl+C at any time to exit[/dim]"
-        )
-        
-        self.console.print(Panel(
-            welcome_text,
-            title="[bold white]✨ ACT - Advanced AI Chat Terminal ✨[/bold white]",
-            border_style="cyan",
-            padding=(1, 2),
-            highlight=True
-        ))
-        
         while True:
             try:
+                # Check API availability first
                 openai_available = bool(os.getenv('OPENAI_API_KEY'))
                 openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
                 anthropic_available = bool(os.getenv('ANTHROPIC_API_KEY'))
                 
+                # Check if Agent is enabled and active
+                settings = self._load_settings()
+                agent_enabled = settings.get('agent', {}).get('enabled', False)
+                agent_active = (
+                    agent_enabled and 
+                    self.chroma_manager and 
+                    self.chroma_manager.vectorstore is not None and
+                    self.chroma_manager.store_name is not None
+                )
+                
+                # Get agent status for main menu
+                agent_info = f" 〈{self._get_agent_status_display()}〉"
+                
+                # Update main menu choices with agent status
                 main_choices = [
                     ("═══ Select Your AI Provider ═══", None),
                     ("★ Favorite Models   〈Your preferred AI companions〉", "favorites"),
                 ]
                 
+                # OpenAI status - Yellow when agent is enabled (embed only)
                 if openai_available:
-                    main_choices.append(("🟢 OpenAI Models    〈GPT-4, GPT-3.5 & More〉", "openai"))
+                    if agent_enabled:
+                        status = "🟡"  # Always yellow when agent enabled
+                        status_info = " 〈Agent: Embed Only〉"
+                    else:
+                        status = "🟢"  # Green for normal operation
+                        status_info = ""
+                    main_choices.append((f"{status} OpenAI Models    〈GPT-4, GPT-3.5 & More〉{status_info}", "openai"))
                 else:
                     main_choices.append(("○ OpenAI Models    〈API Key Required〉", None))
                 
+                # OpenRouter status - Always green when available
                 if openrouter_available:
                     main_choices.append(("🟢 OpenRouter Models 〈Multiple Providers〉", "openrouter"))
                 else:
                     main_choices.append(("○ OpenRouter Models 〈API Key Required〉", None))
                 
+                # Anthropic status - Red when agent is enabled
                 if anthropic_available:
-                    main_choices.append(("🟢 Anthropic Models 〈Claude & More〉", "anthropic"))
+                    if agent_enabled:
+                        status = "🔴"  # Always red when agent enabled
+                        status_info = " 〈Agent: Not Supported〉"
+                    else:
+                        status = "🟢"  # Green for normal operation
+                        status_info = ""
+                    main_choices.append((f"{status} Anthropic Models 〈Claude & More〉{status_info}", "anthropic"))
                 else:
                     main_choices.append(("○ Anthropic Models 〈API Key Required〉", None))
                 
                 main_choices.extend([
                     ("═══ System Settings ═══", None),
-                    ("⚙️ AI Settings       〈Configure AI Behavior〉", "ai_settings"),
+                    (f"⚙️ AI Settings       〈Configure AI Behavior〉{agent_info}", "ai_settings"),
                     ("⚙️ Application Settings 〈Configure App Behavior〉", "settings"),
                     ("═══ Application ═══", None),
                     ("✖ Exit Application    〈Close ACT〉", "exit")
                 ])
+                
+                # Only show logo on first display
+                if not hasattr(self, '_menu_displayed'):
+                    logo = """[bold cyan]
+    ╔═══╗╔═══╗╔════╗
+    ║╔═╗║║╔═╗║║╔╗╔╗║
+    ║║ ║║║║ ╚╝╚╝║║╚╝
+    ║╔═╗║║║ ╔╗  ║║  
+    ║║ ║║║║ ╚╝  ║║  
+    ╚╝ ╚╝╚═══╝  ╚╝  
+[/bold cyan]"""
+                    
+                    welcome_text = (
+                        f"{logo}\n"
+                        "[bold white]Welcome to[/bold white] [bold cyan]ACT[/bold cyan] [bold white](AI Chat Terminal)[/bold white]\n\n"
+                        "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n"
+                        "🤖 [bold]Your Gateway to Advanced AI Conversations[/bold]\n"
+                        "📝 Choose from multiple AI models and providers\n"
+                        "💡 Each model offers unique capabilities\n"
+                        "⚡ Powered by OpenAI, Anthropic, and OpenRouter\n"
+                        "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n\n"
+                        "[dim]Press Ctrl+C at any time to exit[/dim]"
+                    )
+                    
+                    self.console.print(Panel(
+                        welcome_text,
+                        title="[bold white]✨ ACT - Advanced AI Chat Terminal ✨[/bold white]",
+                        border_style="cyan",
+                        padding=(1, 2),
+                        highlight=True
+                    ))
+                    self._menu_displayed = True
 
                 theme = themes.load_theme_from_dict({
                     "Question": {
@@ -660,7 +1062,6 @@ class AIChatApp:
                 ]
                 
                 answer = inquirer.prompt(questions, theme=theme)
-                
                 if not answer or answer['provider'] == "exit":
                     self.logger.info("User selected to exit")
                     self.console.print(Panel(
@@ -671,75 +1072,57 @@ class AIChatApp:
                         padding=(1, 2)
                     ))
                     break
-                
-                selected_provider = answer['provider']
 
-                if selected_provider == "instructions":
-                    self.manage_instructions()
-                    continue
-                elif selected_provider == "settings":
+                if answer['provider'] == "ai_settings":
+                    if self.manage_ai_settings():
+                        continue  # Refresh menu if settings changed
+                elif answer['provider'] == "settings":
                     self.manage_settings()
-                    continue
-                elif selected_provider == "favorites":
+                elif answer['provider'] == "favorites":
                     self.manage_favorites()
-                    continue
-                elif selected_provider == "ai_settings":
-                    self.manage_ai_settings()
-                    continue
-
-                if selected_provider == "openai":
-                    openai_models = [
-                        (f"{model['name']} - {model.get('description', 'No description')}", model)
-                        for model in self.models_config
-                        if model.get('provider', 'openai').lower() == 'openai'
-                    ]
-                    openai_models.append(("Back", None))
+                elif answer['provider'] == "openai" and openai_available:
+                    # Filter OpenAI models
+                    openai_models = [m for m in self.models_config if m.get('provider', '').lower() == 'openai']
+                    model_choices = [(f"{m['name']} - {m.get('description', 'No description')}", m) for m in openai_models]
+                    model_choices.append(("Back", None))
                     
                     model_question = [
                         inquirer.List('model',
                             message="Select OpenAI Model",
-                            choices=openai_models,
+                            choices=model_choices,
                             carousel=True
                         ),
                     ]
                     
                     model_answer = inquirer.prompt(model_question)
-                    if model_answer and model_answer['model'] is not None:
-                        selected_model = model_answer['model']
-                        self._handle_model_selection(selected_model)
-                
-                elif selected_provider == "anthropic":
-                    anthropic_models = [
-                        (f"{model['name']} - {model.get('description', 'No description')}", model)
-                        for model in self.models_config
-                        if model.get('provider', '').lower() == 'anthropic'
-                    ]
-                    anthropic_models.append(("Back", None))
+                    if model_answer and model_answer['model']:
+                        if self._handle_model_selection(model_answer['model']):
+                            continue  # Return to main menu
+                elif answer['provider'] == "openrouter" and openrouter_available:
+                    selected_model = self.select_openrouter_model()
+                    if selected_model:
+                        if self._handle_model_selection(selected_model):
+                            continue  # Return to main menu
+                elif answer['provider'] == "anthropic" and anthropic_available:
+                    # Filter Anthropic models
+                    anthropic_models = [m for m in self.models_config if m.get('provider', '').lower() == 'anthropic']
+                    model_choices = [(f"{m['name']} - {m.get('description', 'No description')}", m) for m in anthropic_models]
+                    model_choices.append(("Back", None))
                     
                     model_question = [
                         inquirer.List('model',
                             message="Select Anthropic Model",
-                            choices=anthropic_models,
+                            choices=model_choices,
                             carousel=True
                         ),
                     ]
                     
                     model_answer = inquirer.prompt(model_question)
-                    if model_answer and model_answer['model'] is not None:
-                        selected_model = model_answer['model']
-                        self._handle_model_selection(selected_model)
-                
-                elif selected_provider == "openrouter":
-                    selected_model = self.select_openrouter_model()
-                    if selected_model:
-                        model_config = {
-                            'id': selected_model['id'],
-                            'name': selected_model['name'],
-                            'description': selected_model.get('description', 'No description'),
-                            'provider': 'openrouter'
-                        }
-                        self._handle_model_selection(model_config)
-            
+                    if model_answer and model_answer['model']:
+                        if self._handle_model_selection(model_answer['model']):
+                            continue  # Return to main menu
+                # ... rest of the menu handling ...
+
             except KeyboardInterrupt:
                 self.logger.warning("Application interrupted")
                 self.console.print(Panel(
@@ -781,14 +1164,76 @@ class AIChatApp:
         """Start chat with selected model"""
         try:
             system_instruction = self.instructions_manager.get_selected_instruction()
-            chat = AIChat(model_config, self.logger, self.console, system_instruction, self.settings_manager)
+            
+            # Only allow file context for OpenRouter models
+            enable_file_context = (
+                model_config.get('provider', '').lower() == 'openrouter' and
+                self.chroma_manager.vectorstore is not None
+            )
+            
+            chat = AIChat(
+                model_config,
+                self.logger,
+                self.console,
+                system_instruction,
+                self.settings_manager,
+                chroma_manager=self.chroma_manager if enable_file_context else None
+            )
             chat.chat_loop()
-            # Clear any remaining menu state and return to main menu
             return True
         except Exception as e:
             self.logger.error(f"Error starting chat: {e}", exc_info=True)
             self.console.print(f"[bold red]Error starting chat: {e}[/bold red]")
             return False
+
+    def _load_settings(self) -> Dict:
+        """Load settings from file"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    
+                    # Ensure agent settings exist with defaults
+                    if 'agent' not in settings:
+                        settings['agent'] = {
+                            'enabled': False
+                        }
+                        self._save_settings(settings)
+                    return settings
+            return {
+                'agent': {
+                    'enabled': False
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"Error loading settings: {e}")
+            return {'agent': {'enabled': False}}
+
+    def _save_settings(self, settings: Dict) -> None:
+        """Save settings to file"""
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            self.logger.error(f"Error saving settings: {e}")
+
+    def _get_agent_status_display(self):
+        """Get formatted agent status for display"""
+        settings = self._load_settings()
+        agent_enabled = settings.get('agent', {}).get('enabled', False)
+        agent_active = (
+            agent_enabled and 
+            self.chroma_manager and 
+            self.chroma_manager.vectorstore is not None and
+            self.chroma_manager.store_name is not None
+        )
+
+        if agent_active:
+            return f"🟢 Active - Store: {self.chroma_manager.store_name}"
+        elif agent_enabled:
+            return "🟡 Enabled (No Store Selected)"
+        else:
+            return "⭕ Disabled"
 
 def main():
     """Main application entry point"""

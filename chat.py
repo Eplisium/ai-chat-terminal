@@ -82,17 +82,18 @@ class OpenRouterAPI:
         return dict(company_models)
 
 class AIChat:
-    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None):
+    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None):
         """Initialize AI Chat with specific model configuration"""
         self.logger = logger
         self.console = console
         self.settings_manager = settings_manager
+        self.chroma_manager = chroma_manager
         dotenv.load_dotenv()
 
         self.model_id = model_config['id']
         self.model_name = model_config['name']
         self.provider = model_config.get('provider', 'openai')
-        self.max_tokens = model_config.get('max_tokens')  # Get max_tokens from config
+        self.max_tokens = model_config.get('max_tokens')
         self.start_time = datetime.now()
         
         # Handle system instruction name and content
@@ -238,117 +239,118 @@ class AIChat:
             return False, f"Error processing directory: {str(e)}"
 
     def send_message(self, user_input):
-        """Send user message and get AI response"""
+        """Send a message to the AI and get a response"""
         try:
-            if not user_input.strip():
-                self.logger.warning("Empty user input")
-                return None
-            
-            messages = self.messages.copy()
+            # Process file context if available
+            if self.chroma_manager and self.chroma_manager.vectorstore:
+                relevant_context = self.chroma_manager.search_context(user_input)
+                if relevant_context:
+                    context_message = {
+                        "role": "system",
+                        "content": "Here is some relevant context from the files:\n\n" + "\n\n".join(relevant_context)
+                    }
+                    messages = [self.messages[0], context_message] + self.messages[1:]
+                else:
+                    messages = self.messages.copy()
+            else:
+                messages = self.messages.copy()
+
+            # Add user message
             current_message = {"role": "user", "content": user_input}
             
-            # Process directory references
-            if '[[dir:' in user_input and ']]' in user_input:
-                processed_parts = []
-                remaining_text = user_input
-                
-                while '[[dir:' in remaining_text and ']]' in remaining_text:
-                    start = remaining_text.find('[[dir:')
-                    end = remaining_text.find(']]', start) + 2
-                    
-                    # Add text before the directory reference
-                    if start > 0:
-                        processed_parts.append(remaining_text[:start])
-                    
-                    # Process directory reference
-                    dir_ref = remaining_text[start:end]
-                    success, content = self._process_directory_reference(dir_ref)
-                    if success:
-                        processed_parts.append(content)
-                    else:
-                        processed_parts.append(f"[Error reading directory: {content}]")
-                    
-                    remaining_text = remaining_text[end:]
-                
-                # Add any remaining text
-                if remaining_text:
-                    processed_parts.append(remaining_text)
-                
-                # Join all parts
-                current_message["content"] = '\n'.join(processed_parts)
-            
-            # Process file references
-            elif '[[file:' in user_input and ']]' in user_input:
-                processed_parts = []
-                remaining_text = user_input
-                
-                while '[[file:' in remaining_text and ']]' in remaining_text:
-                    start = remaining_text.find('[[file:')
-                    end = remaining_text.find(']]', start) + 2
-                    
-                    # Add text before the file reference
-                    if start > 0:
-                        processed_parts.append(remaining_text[:start])
-                    
-                    # Process file reference
-                    file_ref = remaining_text[start:end]
-                    success, content = self._process_file_reference(file_ref)
-                    if success:
-                        processed_parts.append(content)
-                    else:
-                        processed_parts.append(f"[Error reading file: {content}]")
-                    
-                    remaining_text = remaining_text[end:]
-                
-                # Add any remaining text
-                if remaining_text:
-                    processed_parts.append(remaining_text)
-                
-                # Join all parts
-                current_message["content"] = '\n'.join(processed_parts)
-            
-            # Process image references
-            elif '[[img:' in user_input and ']]' in user_input:
+            # Process code blocks and file/directory references
+            if "```" in user_input or "[[" in user_input:
                 content = []
                 remaining_text = user_input
                 
-                while '[[img:' in remaining_text and ']]' in remaining_text:
-                    start = remaining_text.find('[[img:')
-                    end = remaining_text.find(']]', start)
+                # Extract code blocks
+                while "```" in remaining_text:
+                    start = remaining_text.find("```")
+                    if start == -1:
+                        break
                     
+                    # Add text before code block
                     if start > 0:
                         content.append({
                             "type": "text",
                             "text": remaining_text[:start].strip()
                         })
                     
-                    img_ref = remaining_text[start+6:end].strip()
-                    if img_ref.startswith('"') and img_ref.endswith('"'):
-                        img_ref = img_ref[1:-1]
-                    elif img_ref.startswith("'") and img_ref.endswith("'"):
-                        img_ref = img_ref[1:-1]
+                    # Find the end of the code block
+                    end = remaining_text.find("```", start + 3)
+                    if end == -1:
+                        # No closing backticks, treat rest as text
+                        content.append({
+                            "type": "text",
+                            "text": remaining_text[start:].strip()
+                        })
+                        break
                     
-                    success, result = encode_image_to_base64(img_ref)
-                    if success:
-                        if self.provider == 'anthropic':
-                            content.append({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": get_image_mime_type(img_ref),
-                                    "data": result
-                                }
-                            })
-                        else:
-                            content.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{get_image_mime_type(img_ref)};base64,{result}"
-                                }
-                            })
+                    # Extract language (if specified) and code
+                    code_block = remaining_text[start+3:end]
+                    language = ""
+                    if "\n" in code_block:
+                        first_line = code_block[:code_block.find("\n")].strip()
+                        if first_line and not first_line.startswith(" "):
+                            language = first_line
+                            code_block = code_block[code_block.find("\n")+1:]
+                    
+                    content.append({
+                        "type": "code",
+                        "language": language,
+                        "code": code_block.strip()
+                    })
+                    
+                    remaining_text = remaining_text[end+3:]
+                
+                # Process remaining text for file/directory references
+                while "[[" in remaining_text:
+                    start = remaining_text.find("[[")
+                    if start == -1:
+                        break
+                    
+                    # Add text before reference
+                    if start > 0:
+                        content.append({
+                            "type": "text",
+                            "text": remaining_text[:start].strip()
+                        })
+                    
+                    # Find the end of the reference
+                    end = remaining_text.find("]]", start)
+                    if end == -1:
+                        # No closing brackets, treat rest as text
+                        content.append({
+                            "type": "text",
+                            "text": remaining_text[start:].strip()
+                        })
+                        break
+                    
+                    # Extract reference type and path
+                    ref = remaining_text[start+2:end].strip()
+                    if ":" in ref:
+                        ref_type, ref_path = ref.split(":", 1)
+                        ref_path = ref_path.strip('"').strip("'").strip()
+                        
+                        # Add file content to ChromaDB if available
+                        if ref_type == "file" and self.chroma_manager and self.chroma_manager.vectorstore:
+                            try:
+                                with open(ref_path, 'r', encoding='utf-8') as f:
+                                    file_content = f.read()
+                                    self.chroma_manager.add_file_to_store(ref_path, file_content)
+                            except Exception as e:
+                                self.logger.error(f"Error adding file to store: {e}")
+                        
+                        content.append({
+                            "type": "reference",
+                            "ref_type": ref_type,
+                            "path": ref_path
+                        })
                     else:
-                        self.logger.error(f"Failed to process image {img_ref}: {result}")
-                        self.console.print(f"[bold red]Error processing image: {result}[/bold red]")
+                        content.append({
+                            "type": "text",
+                            "text": remaining_text[start:end+2].strip()
+                        })
                     
                     remaining_text = remaining_text[end+2:]
                 
