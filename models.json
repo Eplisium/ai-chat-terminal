@@ -45,7 +45,7 @@
             "id": "gpt-4",
             "description": "Expensive, but powerful and capable of handling complex tasks.",
             "context_window": 8192,
-            "max_tokens": 8192,
+            "max_tokens": 4096,
             "provider": "openai"
         },
         {
