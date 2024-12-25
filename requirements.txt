@@ -1,3 +1,4 @@
+# Core dependencies
 openai>=1.0.0
 anthropic>=0.7.0
 python-dotenv>=0.19.0
@@ -5,17 +6,27 @@ rich>=13.0.0
 inquirer>=3.1.0
 requests>=2.31.0
 Pillow>=10.0.0
+pydantic>=2.0.0
 
-# ChromaDB dependencies
+# Vector store and embeddings
 langchain-openai>=0.0.5
 langchain-chroma>=0.0.5
 chromadb>=0.4.22
 
-# Optional document handling dependencies
-python-docx>=0.8.11
-PyPDF2>=3.0.0
-odfpy>=1.4.1
-pyth>=0.7.0
+# Document handling
+python-docx>=0.8.11  # for DOCX files
+PyPDF2>=3.0.0       # for PDF files
+odfpy>=1.4.1        # for ODT files
+pyth>=0.7.0         # for RTF files (legacy support)
 
-# Note: Some dependencies might need to be installed manually if not available on PyPI
-# pyth might need to be installed from source as it's not actively maintained
+# Optional dependencies that are imported conditionally
+# These will be used if available but are not required for core functionality
+typing-extensions>=4.0.0  # for enhanced type hints
+pprint>=0.1            # for debug printing
+
+# Notes:
+# 1. Some packages like 'rtf' are imported conditionally and may need manual installation
+# 2. pyth is not actively maintained, consider alternatives for RTF support
+# 3. All version numbers are minimum requirements, newer versions should work
+# 4. Core dependencies are required for basic functionality
+# 5. Document handling dependencies are optional based on needs
