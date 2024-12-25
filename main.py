@@ -466,6 +466,7 @@ class AIChatApp:
             choices = [
                 ("=== AI Settings ===", None),
                 ("🤖 System Instructions", "instructions"),
+                ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
             ]
 
@@ -483,6 +484,92 @@ class AIChatApp:
 
             if answer['setting'] == "instructions":
                 self.manage_instructions()
+            elif answer['setting'] == "contexts":
+                self.manage_model_contexts()
+
+    def manage_model_contexts(self):
+        """Display and manage context window settings for models"""
+        while True:
+            # Group models by provider
+            providers = {}
+            for model in self.models_config:
+                provider = model.get('provider', 'unknown')
+                if provider not in providers:
+                    providers[provider] = []
+                providers[provider].append(model)
+
+            # Create choices list with provider headers and models
+            choices = []
+            for provider in sorted(providers.keys()):
+                choices.append((f"=== {provider.upper()} Models ===", None))
+                for model in providers[provider]:
+                    context_window = model.get('context_window', 'N/A')
+                    max_tokens = model.get('max_tokens', 'N/A')
+                    choices.append((
+                        f"{model['name']} (Context: {context_window}, Max Tokens: {max_tokens})",
+                        model
+                    ))
+            
+            choices.extend([
+                ("=== Navigation ===", None),
+                ("Back", "back")
+            ])
+
+            questions = [
+                inquirer.List('model',
+                    message="Select model to configure context",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['model'] == "back":
+                break
+
+            if answer['model']:
+                model = answer['model']
+                current_context = model.get('context_window', 0)
+                current_max_tokens = model.get('max_tokens', 0)
+
+                self.console.print(f"\n[cyan]Current settings for {model['name']}:[/cyan]")
+                self.console.print(f"Context Window: {current_context}")
+                self.console.print(f"Max Tokens: {current_max_tokens}\n")
+
+                context_question = [
+                    inquirer.Text('context',
+                        message="Enter new context window size (or press Enter to keep current)",
+                        default=str(current_context)
+                    ),
+                    inquirer.Text('max_tokens',
+                        message="Enter new max tokens (or press Enter to keep current)",
+                        default=str(current_max_tokens)
+                    )
+                ]
+
+                context_answer = inquirer.prompt(context_question)
+                if context_answer:
+                    try:
+                        new_context = int(context_answer['context'])
+                        new_max_tokens = int(context_answer['max_tokens'])
+
+                        # Update the model in models_config
+                        for m in self.models_config:
+                            if m['id'] == model['id']:
+                                m['context_window'] = new_context
+                                m['max_tokens'] = new_max_tokens
+                                break
+
+                        # Save updated config to models.json
+                        models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+                        with open(models_path, 'w') as f:
+                            json.dump({'models': self.models_config}, f, indent=4)
+
+                        self.console.print(f"[green]Successfully updated context settings for {model['name']}[/green]")
+                    except ValueError:
+                        self.console.print("[red]Invalid input. Please enter numeric values.[/red]")
+                    except Exception as e:
+                        self.console.print(f"[red]Error updating settings: {e}[/red]")
 
     def display_main_menu(self):
         """Display the main menu for model selection"""
