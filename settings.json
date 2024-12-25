@@ -48,5 +48,9 @@
             "build",
             "dist"
         ]
+    },
+    "appearance": {
+        "ai_name_color": "#800080",
+        "instruction_name_color": "#00FFFF"
     }
 }
