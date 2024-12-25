@@ -1,6 +1,6 @@
 from imports import *
 from utils import setup_logging
-from managers import SettingsManager, SystemInstructionsManager
+from managers import SettingsManager, SystemInstructionsManager, DataManager
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
 
 class AIChatApp:
@@ -12,6 +12,7 @@ class AIChatApp:
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
         self.settings_manager = SettingsManager(logger, console)
+        self.data_manager = DataManager(logger, console)
         
         # Load models from JSON
         try:
@@ -427,6 +428,10 @@ class AIChatApp:
                 ("=== Application Settings ===", None),
                 ("🔍 Appearance Settings", "appearance"),
                 ("🔍 Codebase Search Settings", "codebase"),
+                ("=== Data Management ===", None),
+                ("🗑️ Clear All Logs", "clear_logs"),
+                ("🗑️ Clear Chat History", "clear_chats"),
+                ("=== Navigation ===", None),
                 ("Back to Main Menu", "back")
             ]
 
@@ -446,6 +451,14 @@ class AIChatApp:
                 self.settings_manager.manage_codebase_settings()
             elif answer['setting'] == "appearance":
                 self.settings_manager.manage_appearance_settings()
+            elif answer['setting'] == "clear_logs":
+                confirm = inquirer.confirm("Are you sure you want to clear all logs?", default=False)
+                if confirm:
+                    self.data_manager.clear_logs()
+            elif answer['setting'] == "clear_chats":
+                confirm = inquirer.confirm("Are you sure you want to clear all chat history?", default=False)
+                if confirm:
+                    self.data_manager.clear_chats()
 
     def manage_ai_settings(self):
         """Display AI settings management menu"""
