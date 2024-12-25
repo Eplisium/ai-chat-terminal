@@ -72,51 +72,90 @@ class AIChatApp:
         self.favorites = [f for f in self.favorites if f['id'] != model_id]
         self.save_favorites()
 
+    def sort_favorites(self, sort_key="name"):
+        """Sort favorites list based on the given key"""
+        if sort_key == "name":
+            self.favorites.sort(key=lambda x: x['name'].lower())
+        elif sort_key == "provider":
+            self.favorites.sort(key=lambda x: (x['provider'].lower(), x['name'].lower()))
+        self.save_favorites()
+
     def manage_favorites(self):
         """Display favorites management menu"""
         if not self.favorites:
             self.console.print("[yellow]No favorite models yet[/yellow]")
             return
 
-        choices = [(f"{f['name']} ({f['provider']})", f) for f in self.favorites]
-        choices.append(("Back", None))
-
-        questions = [
-            inquirer.List('favorite',
-                message="Select favorite to manage",
-                choices=choices,
-                carousel=True
-            ),
+        sort_choices = [
+            ("Sort by Name", "name"),
+            ("Sort by Provider", "provider"),
+            ("Back to Favorites", "back")
         ]
 
-        answer = inquirer.prompt(questions)
-        if not answer or answer['favorite'] is None:
-            return
+        while True:
+            choices = [(f"{f['name']} ({f['provider']})", f) for f in self.favorites]
+            choices.extend([
+                ("═══ Sort Options ═══", None),
+                ("Sort Favorites", "sort"),
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ])
 
-        selected = answer['favorite']
-        action_choices = [
-            ("Start Chat", "chat"),
-            ("Remove from Favorites", "remove"),
-            ("Back", "back")
-        ]
+            questions = [
+                inquirer.List('favorite',
+                    message="Select favorite to manage or choose an action",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
 
-        action_question = [
-            inquirer.List('action',
-                message=f"Manage {selected['name']}",
-                choices=action_choices,
-                carousel=True
-            ),
-        ]
+            answer = inquirer.prompt(questions)
+            if not answer or answer['favorite'] == "back":
+                return
 
-        action_answer = inquirer.prompt(action_question)
-        if not action_answer:
-            return
+            if answer['favorite'] == "sort":
+                sort_question = [
+                    inquirer.List('sort_option',
+                        message="Select sorting method",
+                        choices=sort_choices,
+                        carousel=True
+                    ),
+                ]
+                
+                sort_answer = inquirer.prompt(sort_question)
+                if sort_answer and sort_answer['sort_option'] != "back":
+                    self.sort_favorites(sort_answer['sort_option'])
+                    self.console.print(f"[green]Favorites sorted by {sort_answer['sort_option']}[/green]")
+                continue
 
-        if action_answer['action'] == "chat":
-            self.start_chat(selected)
-        elif action_answer['action'] == "remove":
-            self.remove_from_favorites(selected['id'])
-            self.console.print(f"[green]Removed {selected['name']} from favorites[/green]")
+            if isinstance(answer['favorite'], dict):
+                selected = answer['favorite']
+                action_choices = [
+                    ("Start Chat", "chat"),
+                    ("Remove from Favorites", "remove"),
+                    ("Back", "back")
+                ]
+
+                action_question = [
+                    inquirer.List('action',
+                        message=f"Manage {selected['name']}",
+                        choices=action_choices,
+                        carousel=True
+                    ),
+                ]
+
+                action_answer = inquirer.prompt(action_question)
+                if not action_answer:
+                    continue
+
+                if action_answer['action'] == "chat":
+                    if self.start_chat(selected):
+                        return  # Return to main menu after chat ends
+                elif action_answer['action'] == "remove":
+                    self.remove_from_favorites(selected['id'])
+                    self.console.print(f"[green]Removed {selected['name']} from favorites[/green]")
+                    if not self.favorites:
+                        return
 
     def select_openrouter_model(self):
         """Display nested menu for OpenRouter model selection"""
@@ -632,9 +671,11 @@ class AIChatApp:
         action_answer = inquirer.prompt(action_question)
         if action_answer:
             if action_answer['action'] == "chat":
-                self.start_chat(selected_model)
+                if self.start_chat(selected_model):
+                    return True  # Signal to return to main menu
             elif action_answer['action'] == "favorite":
                 self.add_to_favorites(selected_model)
+        return False
 
     def start_chat(self, model_config):
         """Start chat with selected model"""
@@ -642,9 +683,12 @@ class AIChatApp:
             system_instruction = self.instructions_manager.get_selected_instruction()
             chat = AIChat(model_config, self.logger, self.console, system_instruction, self.settings_manager)
             chat.chat_loop()
+            # Clear any remaining menu state and return to main menu
+            return True
         except Exception as e:
             self.logger.error(f"Error starting chat: {e}", exc_info=True)
             self.console.print(f"[bold red]Error starting chat: {e}[/bold red]")
+            return False
 
 def main():
     """Main application entry point"""
