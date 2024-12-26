@@ -543,6 +543,7 @@ class AIChatApp:
                 (f"Current Store: {current_store}", None),
                 ("Toggle Agent", "toggle"),
                 ("Test Embeddings", "test_embeddings"),
+                ("ChromaDB Settings", "chromadb_settings"),
             ]
 
             if agent_enabled:
@@ -594,6 +595,132 @@ class AIChatApp:
                     self.console.print("[yellow]Please enable the agent first[/yellow]")
                     continue
                 self.chroma_manager.test_embeddings()
+
+            elif answer['action'] == "chromadb_settings":
+                if not self.chroma_manager:
+                    self.console.print("[yellow]Please enable the agent first[/yellow]")
+                    continue
+                
+                settings = self._load_settings()
+                chromadb_settings = settings.get('chromadb', {})
+                
+                while True:
+                    config_choices = [
+                        ("=== ChromaDB Settings ===", None),
+                        (f"Auto Add Files: {'✓' if chromadb_settings.get('auto_add_files', True) else '✗'}", "auto_add"),
+                        (f"Max File Size (MB): {chromadb_settings.get('max_file_size_mb', 5)}", "max_size"),
+                        ("Manage Exclude Patterns", "exclude"),
+                        ("Manage File Types", "file_types"),
+                        ("Back", "back")
+                    ]
+                    
+                    config_question = [
+                        inquirer.List('config_action',
+                            message="Select setting to modify",
+                            choices=config_choices,
+                            carousel=True
+                        ),
+                    ]
+                    
+                    config_answer = inquirer.prompt(config_question)
+                    if not config_answer or config_answer['config_action'] == "back":
+                        break
+                    
+                    if config_answer['config_action'] == "auto_add":
+                        current = chromadb_settings.get('auto_add_files', True)
+                        chromadb_settings['auto_add_files'] = not current
+                        self.console.print(f"[green]Auto add files {'enabled' if not current else 'disabled'}[/green]")
+                    
+                    elif config_answer['config_action'] == "max_size":
+                        size_question = [
+                            inquirer.Text('size',
+                                message="Enter maximum file size in MB",
+                                validate=lambda _, x: x.isdigit() and int(x) > 0,
+                                default=str(chromadb_settings.get('max_file_size_mb', 5))
+                            )
+                        ]
+                        
+                        size_answer = inquirer.prompt(size_question)
+                        if size_answer:
+                            chromadb_settings['max_file_size_mb'] = int(size_answer['size'])
+                            self.console.print("[green]Max file size updated[/green]")
+                    
+                    elif config_answer['config_action'] == "exclude":
+                        patterns = chromadb_settings.get('exclude_patterns', [])
+                        while True:
+                            pattern_choices = [
+                                (f"Remove: {pattern}", f"remove_{pattern}") for pattern in patterns
+                            ]
+                            pattern_choices.extend([
+                                ("Add New Pattern", "add"),
+                                ("Back", "back")
+                            ])
+                            
+                            pattern_question = [
+                                inquirer.List('pattern_action',
+                                    message="Manage exclude patterns",
+                                    choices=pattern_choices,
+                                    carousel=True
+                                ),
+                            ]
+                            
+                            pattern_answer = inquirer.prompt(pattern_question)
+                            if not pattern_answer or pattern_answer['pattern_action'] == "back":
+                                break
+                            
+                            if pattern_answer['pattern_action'] == "add":
+                                new_pattern = inquirer.text(message="Enter new exclude pattern")
+                                if new_pattern and new_pattern not in patterns:
+                                    patterns.append(new_pattern)
+                                    self.console.print(f"[green]Added pattern: {new_pattern}[/green]")
+                            elif pattern_answer['pattern_action'].startswith("remove_"):
+                                pattern = pattern_answer['pattern_action'][7:]
+                                patterns.remove(pattern)
+                                self.console.print(f"[green]Removed pattern: {pattern}[/green]")
+                        
+                        chromadb_settings['exclude_patterns'] = patterns
+                    
+                    elif config_answer['config_action'] == "file_types":
+                        file_types = chromadb_settings.get('file_types', [])
+                        while True:
+                            type_choices = [
+                                (f"Remove: {ft}", f"remove_{ft}") for ft in file_types
+                            ]
+                            type_choices.extend([
+                                ("Add New File Type", "add"),
+                                ("Back", "back")
+                            ])
+                            
+                            type_question = [
+                                inquirer.List('type_action',
+                                    message="Manage file types",
+                                    choices=type_choices,
+                                    carousel=True
+                                ),
+                            ]
+                            
+                            type_answer = inquirer.prompt(type_question)
+                            if not type_answer or type_answer['type_action'] == "back":
+                                break
+                            
+                            if type_answer['type_action'] == "add":
+                                new_type = inquirer.text(
+                                    message="Enter new file type (e.g., .py)",
+                                    validate=lambda _, x: x.startswith('.')
+                                )
+                                if new_type and new_type not in file_types:
+                                    file_types.append(new_type)
+                                    self.console.print(f"[green]Added file type: {new_type}[/green]")
+                            elif type_answer['type_action'].startswith("remove_"):
+                                ft = type_answer['type_action'][7:]
+                                file_types.remove(ft)
+                                self.console.print(f"[green]Removed file type: {ft}[/green]")
+                        
+                        chromadb_settings['file_types'] = file_types
+                    
+                    # Save settings after each change
+                    settings['chromadb'] = chromadb_settings
+                    self._save_settings(settings)
 
             elif answer['action'] == "refresh":
                 if not self.chroma_manager or not self.chroma_manager.store_name:

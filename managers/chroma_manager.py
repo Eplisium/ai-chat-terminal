@@ -118,8 +118,55 @@ class ChromaManager:
                 self.logger.error("No store currently loaded")
                 return False
 
-            if directory_path:
-                return self.process_directory(directory_path, force_refresh=True)
+            # Get current store name and metadata before recreating
+            current_store_name = self.store_name
+            store_path = os.path.join(self.persist_directory, current_store_name)
+            metadata_path = os.path.join(store_path, 'metadata.json')
+            last_directory = None
+
+            # Try to get the last directory from metadata
+            try:
+                if os.path.exists(metadata_path):
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        last_directory = metadata.get('last_directory')
+            except Exception as e:
+                self.logger.error(f"Error reading metadata: {e}")
+
+            # Use provided directory, files, or last directory
+            target_directory = directory_path or last_directory
+            if not target_directory and not files:
+                self.console.print("[yellow]No directory or files specified for refresh[/yellow]")
+                return False
+
+            # Unload current store
+            self.unload_store()
+
+            # Delete the existing store
+            try:
+                store_path = os.path.join(self.persist_directory, current_store_name)
+                if os.path.exists(store_path):
+                    import shutil
+                    def handle_remove_readonly(func, path, exc_info):
+                        """Handle read-only files during deletion"""
+                        import stat
+                        if func in (os.unlink, os.rmdir) and exc_info[1].errno == errno.EACCES:
+                            os.chmod(path, stat.S_IWRITE)
+                            func(path)
+                    shutil.rmtree(store_path, onerror=handle_remove_readonly)
+            except Exception as e:
+                self.logger.error(f"Error deleting store directory: {e}")
+                return False
+
+            # Create a new store with the same name
+            if not self.create_store(current_store_name):
+                self.logger.error("Failed to recreate store")
+                return False
+
+            # Process the directory or files
+            if target_directory:
+                self.console.print(f"[cyan]Using directory: {target_directory}[/cyan]")
+                return self.process_directory(target_directory, force_refresh=True)
             elif files:
                 # Read and process specific files
                 processed_files = []
@@ -149,22 +196,6 @@ class ChromaManager:
                     self.vectorstore.add_texts(documents)
                     self.console.print("[green]Successfully refreshed files in ChromaDB store[/green]")
                     return True
-            else:
-                # Try to use the last used directory from metadata
-                store_path = os.path.join(self.persist_directory, self.store_name)
-                metadata_path = os.path.join(store_path, 'metadata.json')
-                try:
-                    if os.path.exists(metadata_path):
-                        with open(metadata_path, 'r') as f:
-                            metadata = json.load(f)
-                            last_directory = metadata.get('last_directory')
-                            if last_directory and os.path.exists(last_directory):
-                                self.console.print(f"[cyan]Using last processed directory: {last_directory}[/cyan]")
-                                return self.process_directory(last_directory, force_refresh=True)
-                            else:
-                                self.console.print("[yellow]No valid last directory found[/yellow]")
-                except Exception as e:
-                    self.logger.error(f"Error reading metadata: {e}")
 
             return False
             
@@ -348,18 +379,6 @@ class ChromaManager:
     def load_store(self, store_name: str) -> bool:
         """Load an existing ChromaDB store"""
         try:
-            if not self.embeddings:
-                self.logger.error("OpenAI embeddings not available")
-                self.console.print(Panel(
-                    "[red]OpenAI embeddings not available. Please check:[/red]\n\n"
-                    "1. OpenAI API key is set in your .env file\n"
-                    "2. Selected embedding model is valid\n"
-                    "3. You have access to the selected model",
-                    title="Configuration Error",
-                    border_style="red"
-                ))
-                return False
-            
             # Handle "None" or empty store name as special case to unload
             if not store_name or store_name.lower() == "none":
                 if self.vectorstore:
@@ -372,14 +391,43 @@ class ChromaManager:
                 self._save_settings(settings)
                 return True
             
-            # Unload current store if one is loaded
-            if self.vectorstore:
-                self.unload_store()
-            
             store_path = os.path.join(self.persist_directory, store_name)
             if not os.path.exists(store_path):
                 self.logger.error(f"Store '{store_name}' does not exist")
                 return False
+            
+            # Read store metadata to get the embedding model
+            metadata_path = os.path.join(store_path, 'metadata.json')
+            try:
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                store_model = metadata.get('embedding_model', 'text-embedding-3-small')
+            except Exception as e:
+                self.logger.error(f"Error reading store metadata: {e}")
+                return False
+            
+            # Check if we need to switch embedding models
+            settings = self._load_settings()
+            current_model = settings.get('chromadb', {}).get('embedding_model', 'text-embedding-3-small')
+            
+            if current_model != store_model:
+                self.console.print(f"[yellow]Store '{store_name}' uses {store_model} model. Switching embedding model...[/yellow]")
+                
+                # Update settings with store's model
+                if 'chromadb' not in settings:
+                    settings['chromadb'] = {}
+                settings['chromadb']['embedding_model'] = store_model
+                self._save_settings(settings)
+                
+                # Reinitialize embeddings with store's model
+                self.initialize_embeddings()
+                if not self.embeddings:
+                    self.logger.error("Failed to initialize embeddings with store's model")
+                    return False
+            
+            # Unload current store if one is loaded
+            if self.vectorstore:
+                self.unload_store()
             
             # Create new Chroma instance
             try:
@@ -392,8 +440,8 @@ class ChromaManager:
                 
                 # Test the store by getting document count
                 count = self.vectorstore._collection.count()
-                self.logger.info(f"Successfully loaded store '{store_name}' with {count} documents")
-                self.console.print(f"[green]Successfully loaded store: {store_name} ({count} documents)[/green]")
+                self.logger.info(f"Successfully loaded store '{store_name}' with {count} documents using {store_model} embeddings")
+                self.console.print(f"[green]Successfully loaded store: {store_name} ({count} documents) using {store_model} embeddings[/green]")
                 
                 # Update settings with the newly loaded store
                 settings = self._load_settings()
@@ -438,6 +486,22 @@ class ChromaManager:
                 return self.load_store(sanitized_name)
             
             os.makedirs(store_path, exist_ok=True)
+            
+            # Get current embedding model
+            settings = self._load_settings()
+            current_model = settings.get('chromadb', {}).get('embedding_model', 'text-embedding-3-small')
+            
+            # Save store metadata with embedding model information
+            metadata_path = os.path.join(store_path, 'metadata.json')
+            metadata = {
+                'name': store_name,
+                'created_at': datetime.datetime.now().isoformat(),
+                'embedding_model': current_model,
+                'embedding_dimensions': self.EMBEDDING_MODELS[current_model]['dimensions']
+            }
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=4)
+            
             self.store_name = sanitized_name
             self.vectorstore = Chroma(
                 persist_directory=store_path,
@@ -445,16 +509,7 @@ class ChromaManager:
                 collection_name=sanitized_name
             )
             
-            # Save store metadata
-            metadata_path = os.path.join(store_path, 'metadata.json')
-            with open(metadata_path, 'w') as f:
-                json.dump({
-                    'name': store_name,
-                    'created_at': datetime.datetime.now().isoformat(),
-                    'embedding_model': self._load_settings().get('chromadb', {}).get('embedding_model', 'text-embedding-3-small')
-                }, f, indent=4)
-            
-            self.console.print(f"[green]Successfully created store: {store_name}[/green]")
+            self.console.print(f"[green]Successfully created store: {store_name} with {current_model} embeddings[/green]")
             return True
             
         except Exception as e:
@@ -615,6 +670,22 @@ class ChromaManager:
 
             selected_model = answer['model']
             
+            # Warn if a store is loaded with a different model
+            if self.store_name:
+                store_path = os.path.join(self.persist_directory, self.store_name)
+                metadata_path = os.path.join(store_path, 'metadata.json')
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    store_model = metadata.get('embedding_model')
+                    if store_model and store_model != selected_model:
+                        self.console.print(
+                            f"[yellow]Warning: Current store uses {store_model} embeddings. "
+                            "You'll need to refresh the store to use the new model.[/yellow]"
+                        )
+                except Exception as e:
+                    self.logger.warning(f"Could not read store metadata: {e}")
+            
             # Update settings
             if 'chromadb' not in settings:
                 settings['chromadb'] = {}
@@ -623,10 +694,6 @@ class ChromaManager:
 
             # Reinitialize embeddings with new model
             self.initialize_embeddings()
-
-            # If a store is currently loaded, reload it with new embeddings
-            if self.store_name:
-                self.load_store(self.store_name)
 
             self.console.print(f"[green]Successfully updated embedding model to: {selected_model}[/green]")
             return True
