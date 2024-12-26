@@ -333,8 +333,22 @@ class AIChat:
                         ref_type, ref_path = ref.split(":", 1)
                         ref_path = ref_path.strip('"').strip("'").strip()
                         
+                        # Process image references
+                        if ref_type == "img":
+                            success, result = encode_image_to_base64(ref_path)
+                            if success:
+                                mime_type = get_image_mime_type(ref_path)
+                                content.append({
+                                    "type": "image",
+                                    "image_url": f"data:{mime_type};base64,{result}"
+                                })
+                            else:
+                                content.append({
+                                    "type": "text",
+                                    "text": f"Error processing image: {result}"
+                                })
                         # Add file content to ChromaDB if available
-                        if ref_type == "file" and self.chroma_manager and self.chroma_manager.vectorstore:
+                        elif ref_type == "file" and self.chroma_manager and self.chroma_manager.vectorstore:
                             try:
                                 with open(ref_path, 'r', encoding='utf-8') as f:
                                     file_content = f.read()
@@ -400,9 +414,25 @@ class AIChat:
                     ai_response = response.content[0].text
 
                 elif self.provider == 'openrouter':
+                    # Format messages for OpenRouter API
+                    formatted_messages = []
+                    for msg in messages:
+                        if isinstance(msg["content"], list):
+                            # Handle messages with mixed content (text, images, etc.)
+                            content_parts = []
+                            for part in msg["content"]:
+                                if part["type"] == "text":
+                                    content_parts.append({"type": "text", "text": part["text"]})
+                                elif part["type"] == "image":
+                                    content_parts.append({"type": "image_url", "image_url": part["image_url"]})
+                            formatted_messages.append({"role": msg["role"], "content": content_parts})
+                        else:
+                            # Handle simple text messages
+                            formatted_messages.append({"role": msg["role"], "content": msg["content"]})
+
                     request_data = {
                         "model": self.model_id,
-                        "messages": messages,
+                        "messages": formatted_messages,
                         "temperature": 0.7,
                         "stream": False
                     }
@@ -416,7 +446,13 @@ class AIChat:
                     data = response.json()
                     
                     log_api_response("OpenRouter", request_data, data)
-                    ai_response = data['choices'][0]['message']['content'].strip()
+                    
+                    # Handle response based on whether it's a chat completion or image analysis
+                    if "choices" in data:
+                        ai_response = data['choices'][0]['message']['content'].strip()
+                    else:
+                        # Handle case where response doesn't have choices (e.g., image analysis)
+                        ai_response = data.get('content', "No response content available").strip()
                     
                     # Get the generation ID from the response
                     generation_id = data.get('id')
