@@ -560,13 +560,17 @@ class AIChat:
         
         # Create the footer with cost if it's an OpenRouter response
         footer = None
-        if self.provider == 'openrouter' and hasattr(self, 'last_total_cost'):
+        if self.provider == 'openrouter':
             cost_parts = []
             if hasattr(self, 'last_total_cost'):
                 if self.last_total_cost > 0:
                     cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
+                elif self.last_total_cost == 0:
+                    cost_parts.append("Cost: Free")
                 else:
-                    cost_parts.append("Cost: Calculating...")
+                    cost_parts.append("Cost: Not Found")
+            else:
+                cost_parts.append("Cost: Not Found")
             
             if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
                 tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
