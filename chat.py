@@ -46,7 +46,8 @@ class OpenRouterAPI:
                     'pricing': model.get('pricing', {}),
                     'top_provider': model.get('top_provider', False),
                     'family': model.get('family', 'Unknown'),
-                    'created_at': model.get('created_at', None)
+                    'created_at': model.get('created_at', None),
+                    'provider': 'openrouter'
                 })
             
             return transformed_models

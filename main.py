@@ -1165,9 +1165,13 @@ class AIChatApp:
         try:
             system_instruction = self.instructions_manager.get_selected_instruction()
             
-            # Only allow file context for OpenRouter models
+            # Check if agent is enabled and only allow file context for OpenRouter models
+            settings = self._load_settings()
+            agent_enabled = settings.get('agent', {}).get('enabled', False)
             enable_file_context = (
+                agent_enabled and
                 model_config.get('provider', '').lower() == 'openrouter' and
+                self.chroma_manager and
                 self.chroma_manager.vectorstore is not None
             )
             
