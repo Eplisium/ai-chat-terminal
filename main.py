@@ -609,6 +609,7 @@ class AIChatApp:
                         ("=== ChromaDB Settings ===", None),
                         (f"Auto Add Files: {'✓' if chromadb_settings.get('auto_add_files', True) else '✗'}", "auto_add"),
                         (f"Max File Size (MB): {chromadb_settings.get('max_file_size_mb', 5)}", "max_size"),
+                        (f"Search Results Limit: {chromadb_settings.get('search_results_limit', 10)}", "search_limit"),
                         ("Manage Exclude Patterns", "exclude"),
                         ("Manage File Types", "file_types"),
                         ("Back", "back")
@@ -644,6 +645,20 @@ class AIChatApp:
                         if size_answer:
                             chromadb_settings['max_file_size_mb'] = int(size_answer['size'])
                             self.console.print("[green]Max file size updated[/green]")
+                    
+                    elif config_answer['config_action'] == "search_limit":
+                        limit_question = [
+                            inquirer.Text('limit',
+                                message="Enter maximum number of search results",
+                                validate=lambda _, x: x.isdigit() and int(x) > 0,
+                                default=str(chromadb_settings.get('search_results_limit', 10))
+                            )
+                        ]
+                        
+                        limit_answer = inquirer.prompt(limit_question)
+                        if limit_answer:
+                            chromadb_settings['search_results_limit'] = int(limit_answer['limit'])
+                            self.console.print("[green]Search results limit updated[/green]")
                     
                     elif config_answer['config_action'] == "exclude":
                         patterns = chromadb_settings.get('exclude_patterns', [])

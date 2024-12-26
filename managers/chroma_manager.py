@@ -218,9 +218,13 @@ class ChromaManager:
                             'embedding_model': 'text-embedding-3-small',
                             'auto_add_files': True,
                             'max_file_size_mb': 5,
+                            'search_results_limit': 10,  # Add default search limit
                             'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
                             'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
                         }
+                        self._save_settings(settings)
+                    elif 'search_results_limit' not in settings['chromadb']:
+                        settings['chromadb']['search_results_limit'] = 10
                         self._save_settings(settings)
                     return settings
             return {
@@ -228,13 +232,14 @@ class ChromaManager:
                     'embedding_model': 'text-embedding-3-small',
                     'auto_add_files': True,
                     'max_file_size_mb': 5,
+                    'search_results_limit': 10,
                     'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
                     'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
                 }
             }
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
-            return {'chromadb': {'embedding_model': 'text-embedding-3-small'}}
+            return {'chromadb': {'embedding_model': 'text-embedding-3-small', 'search_results_limit': 10}}
 
     def _save_settings(self, settings: Dict) -> None:
         """Save settings to file"""
@@ -532,12 +537,17 @@ class ChromaManager:
             self.logger.error(f"Error adding file to store: {e}")
             return False
     
-    def search_context(self, query: str, k: int = 3) -> List[str]:
+    def search_context(self, query: str, k: int = None) -> List[str]:
         """Search for relevant context in the current store"""
         try:
             if not self.vectorstore:
                 self.logger.error("No store currently loaded")
                 return []
+            
+            # Use configured limit if k is not specified
+            if k is None:
+                settings = self._load_settings()
+                k = settings.get('chromadb', {}).get('search_results_limit', 10)
             
             results = self.vectorstore.similarity_search(query, k=k)
             return [doc.page_content for doc in results]
