@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 import os
+import errno
 from dotenv import load_dotenv
 import json
 from rich.console import Console
