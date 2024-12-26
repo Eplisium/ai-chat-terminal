@@ -328,34 +328,24 @@ class SettingsManager:
     def manage_chromadb_settings(self):
         """Manage ChromaDB settings"""
         while True:
-            chromadb_settings = self.get_setting('chromadb', {})
+            settings = self._load_settings()
+            chromadb_settings = settings.get('chromadb', {})
             
-            # Ensure default values exist
-            if not chromadb_settings:
-                chromadb_settings = {
-                    'default_store': None,
-                    'auto_add_files': True,
-                    'max_file_size_mb': 5,
-                    'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
-                    'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt'],
-                    'embedding_model': 'text-embedding-3-small'
-                }
-                self.settings['chromadb'] = chromadb_settings
-                self._save_settings()
-
             choices = [
-                ("=== ChromaDB Settings ===", None),
-                (f"Auto-Add Files: {'✓' if chromadb_settings.get('auto_add_files', True) else '✗'}", "toggle_auto_add"),
-                ("Set Max File Size (MB)", "max_size"),
+                ("═══ ChromaDB Settings ═══", None),
+                (f"Embedding Model: {chromadb_settings.get('embedding_model', 'text-embedding-3-small')}", "embedding_model"),
+                (f"Auto-Add Files: {chromadb_settings.get('auto_add_files', True)}", "auto_add"),
+                (f"Max File Size: {chromadb_settings.get('max_file_size_mb', 5)}MB", "max_size"),
                 ("Manage File Types", "file_types"),
-                ("Manage Exclude Patterns", "exclude_patterns"),
-                ("Select Embedding Model", "embedding_model"),
-                ("Back to Settings Menu", "back")
+                ("Manage Exclude Patterns", "exclude"),
+                ("Test Embeddings", "test_embeddings"),
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
             ]
 
             questions = [
                 inquirer.List('action',
-                    message="Select setting to modify",
+                    message="Manage ChromaDB Settings",
                     choices=choices,
                     carousel=True
                 ),
@@ -365,125 +355,11 @@ class SettingsManager:
             if not answer or answer['action'] == "back":
                 break
 
-            if answer['action'] == "toggle_auto_add":
-                current = chromadb_settings.get('auto_add_files', True)
-                self.update_setting('chromadb', 'auto_add_files', not current)
-                self.console.print(f"[green]Auto-add files {'disabled' if current else 'enabled'}[/green]")
-
-            elif answer['action'] == "max_size":
-                size_question = [
-                    inquirer.Text('size',
-                        message="Enter maximum file size in MB",
-                        validate=lambda _, x: x.isdigit() and int(x) > 0,
-                        default=str(chromadb_settings.get('max_file_size_mb', 5))
-                    )
-                ]
-
-                size_answer = inquirer.prompt(size_question)
-                if size_answer:
-                    self.update_setting('chromadb', 'max_file_size_mb', int(size_answer['size']))
-                    self.console.print("[green]Maximum file size updated[/green]")
-
-            elif answer['action'] == "file_types":
-                file_types = set(chromadb_settings.get('file_types', []))
-                all_types = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.html', '.css', '.scss', '.sass', '.less', '.vue', '.sql', '.md', '.txt', '.json', '.yaml', '.yml', '.toml']
-
-                # Create checkboxes for file types
-                file_type_choices = [(f"{ft} {'[✓]' if ft in file_types else '[ ]'}", ft) for ft in all_types]
-                file_type_choices.append(("Done", None))
-
-                while True:
-                    type_question = [
-                        inquirer.List('file_type',
-                            message="Toggle file types (select to toggle, 'Done' to finish)",
-                            choices=file_type_choices,
-                            carousel=True
-                        ),
-                    ]
-
-                    type_answer = inquirer.prompt(type_question)
-                    if not type_answer or type_answer['file_type'] is None:
-                        break
-
-                    selected_type = type_answer['file_type']
-                    if selected_type in file_types:
-                        file_types.remove(selected_type)
-                    else:
-                        file_types.add(selected_type)
-
-                    # Update choices to reflect changes
-                    file_type_choices = [(f"{ft} {'[✓]' if ft in file_types else '[ ]'}", ft) for ft in all_types]
-                    file_type_choices.append(("Done", None))
-
-                self.update_setting('chromadb', 'file_types', list(file_types))
-                self.console.print("[green]File types updated[/green]")
-
-            elif answer['action'] == "exclude_patterns":
-                patterns = chromadb_settings.get('exclude_patterns', [])
-                while True:
-                    pattern_choices = [
-                        ("Add New Pattern", "add"),
-                        ("Remove Pattern", "remove"),
-                        ("View Current Patterns", "view"),
-                        ("Back", "back")
-                    ]
-
-                    pattern_question = [
-                        inquirer.List('action',
-                            message="Manage exclude patterns",
-                            choices=pattern_choices,
-                            carousel=True
-                        ),
-                    ]
-
-                    pattern_answer = inquirer.prompt(pattern_question)
-                    if not pattern_answer or pattern_answer['action'] == "back":
-                        break
-
-                    if pattern_answer['action'] == "add":
-                        add_question = [
-                            inquirer.Text('pattern',
-                                message="Enter pattern to exclude (e.g., node_modules)",
-                                validate=lambda _, x: len(x.strip()) > 0
-                            )
-                        ]
-
-                        add_answer = inquirer.prompt(add_question)
-                        if add_answer:
-                            patterns.append(add_answer['pattern'].strip())
-                            self.update_setting('chromadb', 'exclude_patterns', patterns)
-                            self.console.print("[green]Pattern added[/green]")
-
-                    elif pattern_answer['action'] == "remove":
-                        if not patterns:
-                            self.console.print("[yellow]No patterns to remove[/yellow]")
-                            continue
-
-                        remove_choices = [(p, p) for p in patterns]
-                        remove_choices.append(("Back", None))
-
-                        remove_question = [
-                            inquirer.List('pattern',
-                                message="Select pattern to remove",
-                                choices=remove_choices,
-                                carousel=True
-                            ),
-                        ]
-
-                        remove_answer = inquirer.prompt(remove_question)
-                        if remove_answer and remove_answer['pattern']:
-                            patterns.remove(remove_answer['pattern'])
-                            self.update_setting('chromadb', 'exclude_patterns', patterns)
-                            self.console.print("[green]Pattern removed[/green]")
-
-                    elif pattern_answer['action'] == "view":
-                        if patterns:
-                            self.console.print("\n[bold]Current exclude patterns:[/bold]")
-                            for pattern in patterns:
-                                self.console.print(f"• {pattern}")
-                        else:
-                            self.console.print("[yellow]No exclude patterns defined[/yellow]")
-                        self.console.input("\nPress Enter to continue...")
+            elif answer['action'] == "test_embeddings":
+                # Get ChromaManager class to test embeddings
+                from .chroma_manager import ChromaManager
+                chroma_manager = ChromaManager(self.logger, self.console)
+                chroma_manager.test_embeddings()
 
             elif answer['action'] == "embedding_model":
                 # Get ChromaManager class to access available models

@@ -542,6 +542,7 @@ class AIChatApp:
                 (f"Current Status: {self._get_agent_status_display()}", None),
                 (f"Current Store: {current_store}", None),
                 ("Toggle Agent", "toggle"),
+                ("Test Embeddings", "test_embeddings"),
             ]
 
             if agent_enabled:
@@ -556,6 +557,7 @@ class AIChatApp:
                 if self.chroma_manager and self.chroma_manager.store_name:
                     choices.extend([
                         ("Test Search", "test"),
+                        ("Refresh Store", "refresh"),
                         ("Select Embedding Model", "model"),
                     ])
 
@@ -587,6 +589,57 @@ class AIChatApp:
                 self.console.print(f"{icon} Agent {new_status}")
                 return True  # Return True to indicate menu should be refreshed
 
+            elif answer['action'] == "test_embeddings":
+                if not self.chroma_manager:
+                    self.console.print("[yellow]Please enable the agent first[/yellow]")
+                    continue
+                self.chroma_manager.test_embeddings()
+
+            elif answer['action'] == "refresh":
+                if not self.chroma_manager or not self.chroma_manager.store_name:
+                    self.console.print("[yellow]Please select a store first[/yellow]")
+                    continue
+
+                refresh_choices = [
+                    ("Refresh Using Last Directory", "last"),
+                    ("Refresh Different Directory", "directory"),
+                    ("Refresh Specific Files", "files"),
+                    ("Back", None)
+                ]
+
+                refresh_question = [
+                    inquirer.List('refresh_type',
+                        message="Select Refresh Type",
+                        choices=refresh_choices,
+                        carousel=True
+                    ),
+                ]
+
+                refresh_answer = inquirer.prompt(refresh_question)
+                if refresh_answer and refresh_answer['refresh_type']:
+                    if refresh_answer['refresh_type'] == "last":
+                        self.chroma_manager.refresh_store()
+                    elif refresh_answer['refresh_type'] == "directory":
+                        dir_question = [
+                            inquirer.Text('directory',
+                                message="Enter directory path to refresh",
+                                default="."
+                            )
+                        ]
+                        dir_answer = inquirer.prompt(dir_question)
+                        if dir_answer:
+                            self.chroma_manager.refresh_store(directory_path=dir_answer['directory'])
+                    else:  # files
+                        files_question = [
+                            inquirer.Text('files',
+                                message="Enter file paths (comma-separated)",
+                            )
+                        ]
+                        files_answer = inquirer.prompt(files_question)
+                        if files_answer:
+                            files = [f.strip() for f in files_answer['files'].split(',')]
+                            self.chroma_manager.refresh_store(files=files)
+
             elif answer['action'] == "create":
                 name_question = [
                     inquirer.Text('name',
@@ -615,7 +668,10 @@ class AIChatApp:
                     self.console.print("[yellow]No stores available[/yellow]")
                     continue
 
-                store_choices = [(store, store) for store in stores]
+                store_choices = [
+                    ("None (Disable Store)", "none"),  # Add None option at the top
+                ]
+                store_choices.extend((store, store) for store in stores)
                 store_choices.append(("Back", None))
 
                 store_question = [
@@ -627,19 +683,22 @@ class AIChatApp:
                 ]
 
                 store_answer = inquirer.prompt(store_question)
-                if store_answer and store_answer['store']:
-                    if self.chroma_manager.load_store(store_answer['store']):
-                        if inquirer.confirm("Would you like to process a directory now?", default=False):
-                            dir_question = [
-                                inquirer.Text('directory',
-                                    message="Enter directory path to process",
-                                    default="."
-                                )
-                            ]
-                            dir_answer = inquirer.prompt(dir_question)
-                            if dir_answer:
-                                force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                if store_answer:
+                    if store_answer['store'] == "none":
+                        self.chroma_manager.unload_store()
+                    elif store_answer['store']:
+                        if self.chroma_manager.load_store(store_answer['store']):
+                            if inquirer.confirm("Would you like to process a directory now?", default=False):
+                                dir_question = [
+                                    inquirer.Text('directory',
+                                        message="Enter directory path to process",
+                                        default="."
+                                    )
+                                ]
+                                dir_answer = inquirer.prompt(dir_question)
+                                if dir_answer:
+                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
 
             elif answer['action'] == "delete":
                 stores = self.chroma_manager.list_stores()
@@ -857,7 +916,10 @@ class AIChatApp:
                         self.console.print("[red]Failed to create store[/red]")
 
             elif answer['action'] == "select" and stores:
-                store_choices = [(store, store) for store in stores]
+                store_choices = [
+                    ("None (Disable Store)", "none"),  # Add None option at the top
+                ]
+                store_choices.extend((store, store) for store in stores)
                 store_choices.append(("Back", None))
 
                 store_question = [
@@ -869,20 +931,22 @@ class AIChatApp:
                 ]
 
                 store_answer = inquirer.prompt(store_question)
-                if store_answer and store_answer['store']:
-                    if self.chroma_manager.load_store(store_answer['store']):
-                        # Ask if user wants to process a directory
-                        if inquirer.confirm("Would you like to process a directory now?", default=False):
-                            dir_question = [
-                                inquirer.Text('directory',
-                                    message="Enter directory path to process",
-                                    default="."
-                                )
-                            ]
-                            dir_answer = inquirer.prompt(dir_question)
-                            if dir_answer:
-                                force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                if store_answer:
+                    if store_answer['store'] == "none":
+                        self.chroma_manager.unload_store()
+                    elif store_answer['store']:
+                        if self.chroma_manager.load_store(store_answer['store']):
+                            if inquirer.confirm("Would you like to process a directory now?", default=False):
+                                dir_question = [
+                                    inquirer.Text('directory',
+                                        message="Enter directory path to process",
+                                        default="."
+                                    )
+                                ]
+                                dir_answer = inquirer.prompt(dir_question)
+                                if dir_answer:
+                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
+                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
 
             elif answer['action'] == "delete" and stores:
                 store_choices = [(store, store) for store in stores]
