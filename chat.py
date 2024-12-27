@@ -480,6 +480,14 @@ class AIChat:
                                     self.last_tokens_completion = generation_data['data'].get('tokens_completion', 0)
                                     self.last_native_tokens_prompt = generation_data['data'].get('native_tokens_prompt', 0)
                                     self.last_native_tokens_completion = generation_data['data'].get('native_tokens_completion', 0)
+                                    
+                                    # Store per-message stats
+                                    msg_index = len(self.messages) - 1
+                                    setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                                    setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                                    setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                                    setattr(self, f'last_native_tokens_prompt_{msg_index}', self.last_native_tokens_prompt)
+                                    setattr(self, f'last_native_tokens_completion_{msg_index}', self.last_native_tokens_completion)
                                     break
                                 else:
                                     if attempt < max_retries - 1:
@@ -656,13 +664,55 @@ class AIChat:
                 base_filename = f"chat_{timestamp}"
             
             json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
+            
+            # Calculate total tokens and cost for OpenRouter
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_cost = 0
+            if self.provider == 'openrouter':
+                for i in range(1, len(self.messages), 2):
+                    if hasattr(self, f'last_tokens_prompt_{i}'):
+                        total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                        total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                        total_cost += getattr(self, f'last_total_cost_{i}', 0)
+
+            # Calculate session duration
+            duration = datetime.now() - self.start_time
+            hours = duration.seconds // 3600
+            minutes = (duration.seconds % 3600) // 60
+            seconds = duration.seconds % 60
+            duration_str = f"{hours}h {minutes}m {seconds}s"
+
             chat_data = {
                 "model_name": self.model_name,
                 "model_id": self.model_id,
                 "provider": self.provider,
                 "timestamp": self.start_time.isoformat(),
-                "messages": self.messages
+                "duration": duration_str,
+                "system_instruction": {
+                    "name": self.instruction_name,
+                    "content": self.instruction_content
+                },
+                "messages": self.messages,
+                "message_count": len(self.messages) - 1  # Subtract 1 for system message
             }
+
+            # Add OpenRouter specific information
+            if self.provider == 'openrouter':
+                chat_data["usage"] = {
+                    "total_prompt_tokens": total_prompt_tokens,
+                    "total_completion_tokens": total_completion_tokens,
+                    "total_tokens": total_prompt_tokens + total_completion_tokens,
+                    "total_cost": total_cost
+                }
+
+            # Add agent information if available
+            if self.chroma_manager and self.chroma_manager.vectorstore:
+                chat_data["agent"] = {
+                    "store": self.chroma_manager.store_name,
+                    "embedding_model": self.chroma_manager.embedding_model_name
+                }
+
             with open(json_filepath, 'w', encoding='utf-8') as f:
                 json.dump(chat_data, f, indent=2, ensure_ascii=False)
 
@@ -675,6 +725,18 @@ class AIChat:
                 f.write(f"Model ID: {self.model_id}\n")
                 f.write(f"Provider: {self.provider}\n")
                 f.write(f"Date: {self.start_time.strftime('%Y-%m-%d %I:%M:%S %p')}\n")
+                f.write(f"Duration: {duration_str}\n")
+                f.write(f"System Instruction: {self.instruction_name}\n")
+                
+                if self.provider == 'openrouter':
+                    f.write(f"Total Tokens: {total_prompt_tokens + total_completion_tokens} ")
+                    f.write(f"(Prompt: {total_prompt_tokens}, Completion: {total_completion_tokens})\n")
+                    f.write(f"Total Cost: ${total_cost:.6f}\n")
+
+                if self.chroma_manager and self.chroma_manager.vectorstore:
+                    f.write(f"Agent Store: {self.chroma_manager.store_name}\n")
+                    f.write(f"Embedding Model: {self.chroma_manager.embedding_model_name}\n")
+
                 f.write("="*80 + "\n\n")
 
                 for msg in self.messages[1:]:
@@ -762,6 +824,7 @@ class AIChat:
                 '   [[ img:https://...]]          - Include image from URL\n'
                 "💾 Commands:\n"
                 "   - /help - Display detailed help guide\n"
+                "   - /info - Display chat session information\n"
                 "   - /save [name] - Save the chat history (optional custom name)\n"
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
@@ -902,6 +965,9 @@ class AIChat:
                         elif command == '/help':
                             self._display_help()
                             continue
+                        elif command == '/info':
+                            self._display_info()
+                            continue
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
@@ -929,6 +995,7 @@ class AIChat:
         help_text = (
             "[bold cyan]Available Commands:[/bold cyan]\n"
             "  [bold yellow]/help[/bold yellow]    - Display this help message\n"
+            "  [bold yellow]/info[/bold yellow]    - Display chat session information\n"
             "  [bold yellow]/save[/bold yellow]    - Save chat history\n"
             "             Usage: /save [optional_name]\n"
             "  [bold yellow]/clear[/bold yellow]   - Clear screen and chat history\n"
@@ -959,6 +1026,82 @@ class AIChat:
             Panel(
                 help_text,
                 title="[bold white]📚 ACT Help Guide[/bold white]",
+                border_style="cyan",
+                padding=(1, 2)
+            )
+        ) 
+
+    def _display_info(self):
+        """Display chat session information"""
+        # Calculate session duration
+        duration = datetime.now() - self.start_time
+        hours = duration.seconds // 3600
+        minutes = (duration.seconds % 3600) // 60
+        seconds = duration.seconds % 60
+        duration_str = f"{hours}h {minutes}m {seconds}s"
+
+        # Get colors from settings
+        colors = self._get_colors()
+
+        # Build info sections
+        model_info = [
+            "[bold cyan]Model Information:[/bold cyan]",
+            f"  Provider: [bold {colors['ai_name']}]{self.provider.upper()}[/]",
+            f"  Model: [bold {colors['ai_name']}]{self.model_name}[/]",
+            f"  Model ID: {self.model_id}",
+            f"  Max Tokens: {self.max_tokens or 'Not Set'}"
+        ]
+
+        system_info = [
+            "\n[bold cyan]System Information:[/bold cyan]",
+            f"  Instruction: [bold {colors['instruction_name']}]{self.instruction_name}[/]",
+            f"  Session Duration: {duration_str}",
+            f"  Messages in Chat: {len(self.messages) - 1}"  # Subtract 1 for system message
+        ]
+
+        # Add OpenRouter specific information if applicable
+        usage_info = []
+        if self.provider == 'openrouter':
+            usage_info.extend([
+                "\n[bold cyan]Usage Information:[/bold cyan]"
+            ])
+            
+            # Calculate total tokens and cost
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_cost = 0
+            
+            # Iterate through message history to sum up costs
+            for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
+                if hasattr(self, f'last_tokens_prompt_{i}'):
+                    total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                    total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                    total_cost += getattr(self, f'last_total_cost_{i}', 0)
+
+            usage_info.extend([
+                f"  Total Prompt Tokens: {total_prompt_tokens}",
+                f"  Total Completion Tokens: {total_completion_tokens}",
+                f"  Total Tokens: {total_prompt_tokens + total_completion_tokens}",
+                f"  Total Cost: ${total_cost:.6f}" if total_cost > 0 else "  Total Cost: Free"
+            ])
+
+        # Add agent information if available
+        agent_info = []
+        if self.chroma_manager and self.chroma_manager.vectorstore:
+            agent_info.extend([
+                "\n[bold cyan]Agent Information:[/bold cyan]",
+                f"  Store: {self.chroma_manager.store_name}",
+                f"  Embedding Model: {self.chroma_manager.embedding_model_name}"
+            ])
+
+        # Combine all sections
+        info_text = "\n".join(model_info + system_info + usage_info + agent_info)
+
+        # Display in a panel
+        self.console.print(
+            Panel(
+                info_text,
+                title="[bold white]📊 Chat Session Information[/bold white]",
                 border_style="cyan",
                 padding=(1, 2)
             )

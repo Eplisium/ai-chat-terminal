@@ -38,6 +38,7 @@ class ChromaManager:
         self.current_directory = None  # Track current directory
         self.persist_directory = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'chroma_stores')
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        self.embedding_model_name = None  # Track current embedding model name
         
         # Create stores directory if it doesn't exist
         os.makedirs(self.persist_directory, exist_ok=True)
@@ -69,6 +70,7 @@ class ChromaManager:
             # Load settings to get the selected embedding model
             settings = self._load_settings()
             selected_model = settings.get('chromadb', {}).get('embedding_model', 'text-embedding-3-small')
+            self.embedding_model_name = selected_model  # Store the model name
 
             # Initialize embeddings with explicit parameters
             self.embeddings = OpenAIEmbeddings(
@@ -84,6 +86,7 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error initializing embeddings: {e}")
             self.embeddings = None
+            self.embedding_model_name = None  # Clear model name on error
             self.console.print(Panel(
                 f"[red]Error initializing embeddings:[/red]\n{str(e)}\n\n"
                 "[yellow]Please check:[/yellow]\n"
@@ -430,6 +433,8 @@ class ChromaManager:
                 if not self.embeddings:
                     self.logger.error("Failed to initialize embeddings with store's model")
                     return False
+                
+                self.embedding_model_name = store_model  # Update model name after successful initialization
             
             # Unload current store if one is loaded
             if self.vectorstore:
@@ -705,9 +710,11 @@ class ChromaManager:
 
             # Reinitialize embeddings with new model
             self.initialize_embeddings()
-
-            self.console.print(f"[green]Successfully updated embedding model to: {selected_model}[/green]")
-            return True
+            if self.embeddings:
+                self.embedding_model_name = selected_model  # Update model name after successful initialization
+                self.console.print(f"[green]Successfully updated embedding model to: {selected_model}[/green]")
+                return True
+            return False
 
         except Exception as e:
             self.logger.error(f"Error selecting embedding model: {e}")
