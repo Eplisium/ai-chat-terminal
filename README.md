@@ -49,8 +49,8 @@
   | Provider | Agent Support | Mode |
   |----------|--------------|------|
   | OpenRouter | ✅ | Full functionality |
-  | OpenAI | ✅ | Embedding only |
-  | Anthropic | ❌ | Unsupported |
+  | OpenAI | ✅ | Full functionality |
+  | Anthropic | ✅ | Full functionality |
 
 ### 📄 Document Support
 - **Format Compatibility**
@@ -83,9 +83,20 @@
   |---------|-------------|
   | `/help` | Show help guide |
   | `/save [name]` | Save chat history |
+  | `/info` | Display chat session info |
   | `/clear` | Clear screen |
   | `/insert` | Multi-line input |
   | `/end` | End session |
+
+### 💾 Chat History
+- **Saved Information**
+  - Model details (name, ID, provider)
+  - System instruction used
+  - Agent store and embedding model (if enabled)
+  - Total tokens and cost
+  - Full conversation history
+  - Session duration
+  - Date and time
 
 ## 🚀 Getting Started
 
