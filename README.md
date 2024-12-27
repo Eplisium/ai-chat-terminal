@@ -5,7 +5,7 @@
 
 <div align="center">
 
-[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-ACT%20Community-green.svg)](LICENSE)
 
 </div>
@@ -101,7 +101,7 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.7+
+- Python 3.11+
 - API Keys:
   - OpenAI (Required)
   - Anthropic (Optional)
