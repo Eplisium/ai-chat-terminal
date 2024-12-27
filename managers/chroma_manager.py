@@ -743,6 +743,13 @@ class ChromaManager:
                     self.store_name = None
                     self.current_directory = None
                     
+                    # Update settings to reflect no store selected
+                    settings = self._load_settings()
+                    if 'agent' not in settings:
+                        settings['agent'] = {}
+                    settings['agent']['last_store'] = None
+                    self._save_settings(settings)
+                    
                     # Force garbage collection
                     import gc
                     gc.collect()

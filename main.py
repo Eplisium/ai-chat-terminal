@@ -50,12 +50,14 @@ class AIChatApp:
             
             # Try to load last used store
             settings = self._load_settings()
-            last_store = settings.get('agent', {}).get('last_store')
-            if last_store:
-                if self.chroma_manager.load_store(last_store):
-                    self.logger.info(f"Loaded last used store: {last_store}")
-                else:
-                    self.logger.warning(f"Failed to load last store: {last_store}")
+            agent_enabled = settings.get('agent', {}).get('enabled', False)
+            if agent_enabled:
+                last_store = settings.get('agent', {}).get('last_store')
+                if last_store:
+                    if self.chroma_manager.load_store(last_store):
+                        self.logger.info(f"Loaded last used store: {last_store}")
+                    else:
+                        self.logger.warning(f"Failed to load last store: {last_store}")
             
             self.logger.info(f"Loaded {len(self.models_config)} models from configuration")
         except FileNotFoundError:
