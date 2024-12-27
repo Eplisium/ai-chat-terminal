@@ -1178,11 +1178,11 @@ class AIChatApp:
                     ("★ Favorite Models   〈Your preferred AI companions〉", "favorites"),
                 ]
                 
-                # OpenAI status - Yellow when agent is enabled (embed only)
+                # OpenAI status - Green when agent is enabled
                 if openai_available:
                     if agent_enabled:
-                        status = "🟡"  # Always yellow when agent enabled
-                        status_info = " 〈Agent: Embed Only〉"
+                        status = "🟢"  # Green for normal operation with agent
+                        status_info = " 〈Agent: Enabled〉"
                     else:
                         status = "🟢"  # Green for normal operation
                         status_info = ""
@@ -1192,15 +1192,19 @@ class AIChatApp:
                 
                 # OpenRouter status - Always green when available
                 if openrouter_available:
-                    main_choices.append(("🟢 OpenRouter Models 〈Multiple Providers〉", "openrouter"))
+                    if agent_enabled:
+                        status_info = " 〈Agent: Enabled〉"
+                    else:
+                        status_info = ""
+                    main_choices.append((f"🟢 OpenRouter Models 〈Multiple Providers〉{status_info}", "openrouter"))
                 else:
                     main_choices.append(("○ OpenRouter Models 〈API Key Required〉", None))
                 
-                # Anthropic status - Red when agent is enabled
+                # Anthropic status - Now supports agent mode
                 if anthropic_available:
                     if agent_enabled:
-                        status = "🔴"  # Always red when agent enabled
-                        status_info = " 〈Agent: Not Supported〉"
+                        status = "🟢"  # Green for normal operation with agent
+                        status_info = " 〈Agent: Enabled〉"
                     else:
                         status = "🟢"  # Green for normal operation
                         status_info = ""
@@ -1373,12 +1377,11 @@ class AIChatApp:
         try:
             system_instruction = self.instructions_manager.get_selected_instruction()
             
-            # Check if agent is enabled and only allow file context for OpenRouter models
+            # Enable file context for all providers when agent is enabled
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
             enable_file_context = (
                 agent_enabled and
-                model_config.get('provider', '').lower() == 'openrouter' and
                 self.chroma_manager and
                 self.chroma_manager.vectorstore is not None
             )
