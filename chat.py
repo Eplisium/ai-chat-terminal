@@ -356,11 +356,25 @@ class AIChat:
                             except Exception as e:
                                 self.logger.error(f"Error adding file to store: {e}")
                         
-                        content.append({
-                            "type": "reference",
-                            "ref_type": ref_type,
-                            "path": ref_path
-                        })
+                        # Process file and directory references
+                        if ref_type == "file":
+                            success, result = self._process_file_reference(f"[[file:{ref_path}]]")
+                            content.append({
+                                "type": "text",
+                                "text": result
+                            })
+                        elif ref_type == "dir":
+                            success, result = self._process_directory_reference(f"[[dir:{ref_path}]]")
+                            content.append({
+                                "type": "text",
+                                "text": result
+                            })
+                        else:
+                            content.append({
+                                "type": "reference",
+                                "ref_type": ref_type,
+                                "path": ref_path
+                            })
                     else:
                         content.append({
                             "type": "text",
