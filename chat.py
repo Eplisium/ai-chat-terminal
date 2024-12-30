@@ -330,35 +330,21 @@ class AIChat:
                         })
                         break
                     
-                    # Extract reference type and path
+                    # Extract reference
                     ref = remaining_text[start+2:end].strip()
-                    if ":" in ref:
-                        ref_type, ref_path = ref.split(":", 1)
-                        ref_path = ref_path.strip('"').strip("'").strip()
-                        
-                        # Process image references
-                        if ref_type == "img":
-                            success, result = encode_image_to_base64(ref_path)
-                            if success:
-                                mime_type = get_image_mime_type(ref_path)
-                                content.append({
-                                    "type": "image",
-                                    "image_url": f"data:{mime_type};base64,{result}"
-                                })
-                            else:
-                                content.append({
-                                    "type": "text",
-                                    "text": f"Error processing image: {result}"
-                                })
-                        # Add file content to ChromaDB if available
-                        elif ref_type == "file" and self.chroma_manager and self.chroma_manager.vectorstore:
-                            try:
-                                with open(ref_path, 'r', encoding='utf-8') as f:
-                                    file_content = f.read()
-                                    self.chroma_manager.add_file_to_store(ref_path, file_content)
-                            except Exception as e:
-                                self.logger.error(f"Error adding file to store: {e}")
-                        
+                    
+                    # Check for file/dir prefix
+                    ref_type = None
+                    ref_path = ref
+                    
+                    if ref.startswith('file:'):
+                        ref_type = 'file'
+                        ref_path = ref[5:].strip()
+                    elif ref.startswith('dir:'):
+                        ref_type = 'dir'
+                        ref_path = ref[4:].strip()
+                    
+                    if ref_type:
                         # Process file and directory references
                         if ref_type == "file":
                             success, result = self._process_file_reference(f"[[file:{ref_path}]]")
@@ -396,6 +382,12 @@ class AIChat:
 
             messages.append(current_message)
             self.messages.append(current_message)
+            
+            # Check if the message is a command
+            if isinstance(user_input, str):
+                user_input_lower = user_input.strip().lower()
+                if user_input_lower in ['bye', '/end', '/info', '/help', '/clear', '/save', '/insert']:
+                    return None
             
             # Record sent message only when we're about to make the API call
             if self.stats_manager:
@@ -1059,30 +1051,16 @@ class AIChat:
                 try:
                     user_input = self.console.input("[bold yellow]You: [/bold yellow]")
                     
-                    if user_input.lower() in ['exit', 'quit', 'bye']:
-                        self.logger.info("Chat session ended by user")
-                        exit_chat("Thanks for chatting! See you next time!")
-                        break
-
-                    if user_input.startswith('/'):
-                        command_parts = user_input.strip().split(maxsplit=1)
-                        command = command_parts[0].lower()
-                        command_args = command_parts[1] if len(command_parts) > 1 else None
-
-                        if command == '/save':
-                            if len(self.messages) > 1:
-                                if command_args:
-                                    if self.save_chat(command_args):
-                                        self.console.print("[bold green]Chat history saved successfully with custom name![/bold green]")
-                                    else:
-                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
-                                else:
-                                    if self.save_chat():
-                                        self.console.print("[bold green]Chat history saved successfully![/bold green]")
-                                    else:
-                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
-                            else:
-                                self.console.print("[yellow]No messages to save yet.[/yellow]")
+                    # Check for commands
+                    if user_input.strip().startswith('/') or user_input.strip().lower() == 'bye':
+                        command = user_input.strip().lower()
+                        
+                        if command == 'bye':
+                            self.logger.info("Chat session ended by user (bye command)")
+                            exit_chat("Chat session ended. Thanks for using ACT!")
+                            break
+                        elif command == '/save':
+                            self.save_chat()
                             continue
                         elif command == '/clear':
                             os.system('cls' if os.name == 'nt' else 'clear')
