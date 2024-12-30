@@ -96,6 +96,8 @@ class AIChat:
         self.provider = model_config.get('provider', 'openai')
         self.max_tokens = model_config.get('max_tokens')
         self.start_time = datetime.now()
+        self.last_save_path = None  # Track last save location
+        self.last_save_name = None  # Track last used custom name
         
         # Handle system instruction name and content
         if isinstance(system_instruction, dict):
@@ -659,8 +661,7 @@ class AIChat:
             chats_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chats')
             os.makedirs(chats_dir, exist_ok=True)
 
-            timestamp = self.start_time.strftime("%Y%m%d_%I%M%p")
-
+            # Set up the chat directory path first
             if self.provider == 'openrouter':
                 company, model_name = self.model_id.split('/')
                 company = sanitize_path(company)
@@ -668,17 +669,40 @@ class AIChat:
                 chat_dir = os.path.join(chats_dir, 'openrouter', company, model_name)
             else:
                 chat_dir = os.path.join(chats_dir, sanitize_path(self.provider))
-
             os.makedirs(chat_dir, exist_ok=True)
 
+            # Handle custom name logic
+            if not custom_name and self.last_save_name:
+                custom_name = self.last_save_name
+            elif custom_name:
+                self.last_save_name = custom_name
+
+            # Sanitize custom name if it exists
             if custom_name:
                 custom_name = sanitize_path(custom_name)
-                base_filename = f"{custom_name}_{timestamp}"
+
+            # Generate timestamp and base filename
+            timestamp = self.start_time.strftime("%Y%m%d_%I%M%p")
+            base_filename = f"{custom_name}_{timestamp}" if custom_name else f"chat_{timestamp}"
+
+            # Check if we should reuse existing files
+            should_reuse_files = False
+            if custom_name and self.last_save_path and os.path.exists(os.path.dirname(self.last_save_path)):
+                last_save_name = os.path.splitext(os.path.basename(self.last_save_path))[0]
+                if last_save_name.startswith(custom_name + "_"):
+                    should_reuse_files = True
+
+            # Set up file paths
+            if should_reuse_files:
+                json_filepath = self.last_save_path
+                text_filepath = os.path.splitext(self.last_save_path)[0] + ".txt"
             else:
-                base_filename = f"chat_{timestamp}"
-            
-            json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
-            
+                json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
+                text_filepath = os.path.join(chat_dir, f"{base_filename}.txt")
+
+            # Store the json filepath for future saves
+            self.last_save_path = json_filepath
+
             # Calculate total tokens and cost for OpenRouter
             total_prompt_tokens = 0
             total_completion_tokens = 0
