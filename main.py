@@ -4,7 +4,8 @@ from managers import (
     SettingsManager,
     SystemInstructionsManager,
     DataManager,
-    ChromaManager
+    ChromaManager,
+    StatsManager
 )
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
 from typing import Dict, Any
@@ -23,6 +24,7 @@ class AIChatApp:
         self.settings_manager = SettingsManager(logger, console)
         self.data_manager = DataManager(logger, console)
         self.chroma_manager = ChromaManager(logger, console)
+        self.stats_manager = StatsManager(logger, console)
         
         # Load models from JSON
         try:
@@ -449,6 +451,7 @@ class AIChatApp:
                 ("=== Application Settings ===", None),
                 ("🔍 Appearance Settings", "appearance"),
                 ("🔍 Codebase Search Settings", "codebase"),
+                ("📊 ACT Statistics", "statistics"),
                 ("=== Data Management ===", None),
                 ("🗑️ Clear All Logs", "clear_logs"),
                 ("🗑️ Clear Chat History", "clear_chats"),
@@ -472,6 +475,8 @@ class AIChatApp:
                 self.settings_manager.manage_codebase_settings()
             elif answer['setting'] == "appearance":
                 self.settings_manager.manage_appearance_settings()
+            elif answer['setting'] == "statistics":
+                self.manage_statistics()
             elif answer['setting'] == "clear_logs":
                 confirm = inquirer.confirm("Are you sure you want to clear all logs?", default=False)
                 if confirm:
@@ -1377,6 +1382,11 @@ class AIChatApp:
         try:
             system_instruction = self.instructions_manager.get_selected_instruction()
             
+            # Record model and instruction usage
+            self.stats_manager.record_model_usage(model_config)
+            if system_instruction:
+                self.stats_manager.record_instruction_usage(system_instruction['name'])
+            
             # Enable file context for all providers when agent is enabled
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
@@ -1392,7 +1402,8 @@ class AIChatApp:
                 self.console,
                 system_instruction,
                 self.settings_manager,
-                chroma_manager=self.chroma_manager if enable_file_context else None
+                chroma_manager=self.chroma_manager if enable_file_context else None,
+                stats_manager=self.stats_manager  # Pass stats_manager to AIChat
             )
             chat.chat_loop()
             return True
@@ -1449,6 +1460,34 @@ class AIChatApp:
             return "🟡 Enabled (No Store Selected)"
         else:
             return "⭕ Disabled"
+
+    def manage_statistics(self):
+        """Display ACT statistics"""
+        while True:
+            # Get formatted statistics table
+            stats_table = self.stats_manager.format_stats_display()
+            
+            # Display the statistics
+            self.console.print()  # Add some spacing
+            self.console.print(stats_table)
+            self.console.print()  # Add some spacing
+
+            # Navigation options
+            choices = [
+                ("Back", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Select action",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
 
 def main():
     """Main application entry point"""

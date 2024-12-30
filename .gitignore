@@ -46,3 +46,4 @@ system_instructions.json
 settings.json
 run.bat
 chroma_stores/
+act_stats.db

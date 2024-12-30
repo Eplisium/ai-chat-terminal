@@ -83,12 +83,13 @@ class OpenRouterAPI:
         return dict(company_models)
 
 class AIChat:
-    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None):
+    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None, stats_manager=None):
         """Initialize AI Chat with specific model configuration"""
         self.logger = logger
         self.console = console
         self.settings_manager = settings_manager
         self.chroma_manager = chroma_manager
+        self.stats_manager = stats_manager
         dotenv.load_dotenv()
 
         self.model_id = model_config['id']
@@ -242,7 +243,7 @@ class AIChat:
             return False, f"Error processing directory: {str(e)}"
 
     def send_message(self, user_input):
-        """Send a message to the AI and get a response"""
+        """Send a message to the AI model and get the response"""
         try:
             # Process file context if available
             if self.chroma_manager and self.chroma_manager.vectorstore:
@@ -396,6 +397,10 @@ class AIChat:
             messages.append(current_message)
             self.messages.append(current_message)
             
+            # Record sent message only when we're about to make the API call
+            if self.stats_manager:
+                self.stats_manager.record_chat(self.model_id, "sent")
+            
             thinking_message = self.console.status(f"[bold yellow]{self.model_name} is thinking...[/bold yellow]")
             thinking_message.start()
             
@@ -428,6 +433,50 @@ class AIChat:
                     response = self.client.messages.create(**request_data)
                     log_api_response("Anthropic", request_data, response)
                     ai_response = response.content[0].text
+
+                    # Record received message with token count and cost
+                    if self.stats_manager:
+                        token_count = None
+                        prompt_tokens = None
+                        completion_tokens = None
+                        cost = 0
+                        
+                        # Handle new Anthropic API response format
+                        if hasattr(response, 'usage'):
+                            prompt_tokens = response.usage.input_tokens
+                            completion_tokens = response.usage.output_tokens
+                            token_count = prompt_tokens + completion_tokens
+                            cost = self._calculate_anthropic_cost(prompt_tokens, completion_tokens, self.model_id)
+                            
+                            # Store for display
+                            self.last_total_cost = cost
+                            self.last_tokens_prompt = prompt_tokens
+                            self.last_tokens_completion = completion_tokens
+                            
+                            # Store per-message stats
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', prompt_tokens)
+                            setattr(self, f'last_tokens_completion_{msg_index}', completion_tokens)
+                        
+                        self.stats_manager.record_chat(
+                            self.model_id, 
+                            "received", 
+                            token_count=token_count,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            cost=cost
+                        )
+                        
+                        # Update model usage cost
+                        self.stats_manager.record_model_usage(
+                            {
+                                'id': self.model_id,
+                                'name': self.model_name,
+                                'provider': self.provider
+                            },
+                            total_cost=cost
+                        )
 
                 elif self.provider == 'openrouter':
                     # Format messages for OpenRouter API
@@ -528,6 +577,40 @@ class AIChat:
                                         self.last_tokens_prompt = usage.get('prompt_tokens', 0)
                                         self.last_tokens_completion = usage.get('completion_tokens', 0)
 
+                    # Record received message with token and cost information
+                    if self.stats_manager:
+                        token_count = None
+                        prompt_tokens = None
+                        completion_tokens = None
+                        cost = 0
+                        
+                        if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
+                            token_count = self.last_tokens_prompt + self.last_tokens_completion
+                            prompt_tokens = self.last_tokens_prompt
+                            completion_tokens = self.last_tokens_completion
+                        
+                        if hasattr(self, 'last_total_cost'):
+                            cost = self.last_total_cost
+                        
+                        self.stats_manager.record_chat(
+                            self.model_id, 
+                            "received", 
+                            token_count=token_count,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            cost=cost
+                        )
+                        
+                        # Update model usage cost
+                        self.stats_manager.record_model_usage(
+                            {
+                                'id': self.model_id,
+                                'name': self.model_name,
+                                'provider': self.provider
+                            },
+                            total_cost=cost
+                        )
+
                 else:  # OpenAI
                     request_data = {
                         "model": self.model_id,
@@ -543,6 +626,48 @@ class AIChat:
                     response = self.client.chat.completions.create(**request_data)
                     log_api_response("OpenAI", request_data, response)
                     ai_response = response.choices[0].message.content.strip()
+
+                    # Record received message with token count and cost
+                    if self.stats_manager:
+                        token_count = None
+                        prompt_tokens = None
+                        completion_tokens = None
+                        cost = 0
+                        if hasattr(response, 'usage'):
+                            token_count = response.usage.total_tokens
+                            prompt_tokens = response.usage.prompt_tokens
+                            completion_tokens = response.usage.completion_tokens
+                            cost = self._calculate_openai_cost(prompt_tokens, completion_tokens, self.model_id)
+                            
+                            # Store for display
+                            self.last_total_cost = cost
+                            self.last_tokens_prompt = prompt_tokens
+                            self.last_tokens_completion = completion_tokens
+                            
+                            # Store per-message stats
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', prompt_tokens)
+                            setattr(self, f'last_tokens_completion_{msg_index}', completion_tokens)
+                        
+                        self.stats_manager.record_chat(
+                            self.model_id, 
+                            "received", 
+                            token_count=token_count,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            cost=cost
+                        )
+                        
+                        # Update model usage cost
+                        self.stats_manager.record_model_usage(
+                            {
+                                'id': self.model_id,
+                                'name': self.model_name,
+                                'provider': self.provider
+                            },
+                            total_cost=cost
+                        )
 
             except Exception as e:
                 log_api_response(self.provider, request_data, None, error=e)
@@ -620,26 +745,23 @@ class AIChat:
         
         # Create the footer with cost if it's an OpenRouter response
         footer = None
-        if self.provider == 'openrouter':
+        if hasattr(self, 'last_total_cost') and hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
             cost_parts = []
-            if hasattr(self, 'last_total_cost'):
-                if self.last_total_cost > 0:
-                    cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
-                elif self.last_total_cost == 0:
-                    cost_parts.append("Cost: Free")
-                else:
-                    cost_parts.append("Cost: Not Found")
+            
+            if self.last_total_cost > 0:
+                cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
+            elif self.last_total_cost == 0:
+                cost_parts.append("Cost: Free")
             else:
                 cost_parts.append("Cost: Not Found")
             
-            if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
-                tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
-                if hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
-                    if (self.last_native_tokens_prompt != self.last_tokens_prompt or 
-                        self.last_native_tokens_completion != self.last_tokens_completion) and \
-                        self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
-                        tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
-                cost_parts.append(tokens)
+            tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
+            if self.provider == 'openrouter' and hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
+                if (self.last_native_tokens_prompt != self.last_tokens_prompt or 
+                    self.last_native_tokens_completion != self.last_tokens_completion) and \
+                    self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
+                    tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
+            cost_parts.append(tokens)
             
             footer = f"[bold {colors['cost']}]{' | '.join(cost_parts)}[/]"
         
@@ -703,16 +825,17 @@ class AIChat:
             # Store the json filepath for future saves
             self.last_save_path = json_filepath
 
-            # Calculate total tokens and cost for OpenRouter
+            # Calculate total tokens and cost
             total_prompt_tokens = 0
             total_completion_tokens = 0
             total_cost = 0
-            if self.provider == 'openrouter':
-                for i in range(1, len(self.messages), 2):
-                    if hasattr(self, f'last_tokens_prompt_{i}'):
-                        total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
-                        total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
-                        total_cost += getattr(self, f'last_total_cost_{i}', 0)
+            
+            # Iterate through message history to sum up costs
+            for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
+                if hasattr(self, f'last_tokens_prompt_{i}'):
+                    total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                    total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                    total_cost += getattr(self, f'last_total_cost_{i}', 0)
 
             # Calculate session duration
             duration = datetime.now() - self.start_time
@@ -766,10 +889,13 @@ class AIChat:
                 f.write(f"Duration: {duration_str}\n")
                 f.write(f"System Instruction: {self.instruction_name}\n")
                 
-                if self.provider == 'openrouter':
+                if total_prompt_tokens > 0 or total_completion_tokens > 0:
                     f.write(f"Total Tokens: {total_prompt_tokens + total_completion_tokens} ")
                     f.write(f"(Prompt: {total_prompt_tokens}, Completion: {total_completion_tokens})\n")
-                    f.write(f"Total Cost: ${total_cost:.6f}\n")
+                    if total_cost > 0:
+                        f.write(f"Total Cost: ${total_cost:.6f}\n")
+                    else:
+                        f.write("Total Cost: Free\n")
 
                 if self.chroma_manager and self.chroma_manager.vectorstore:
                     f.write(f"Agent Store: {self.chroma_manager.store_name}\n")
@@ -1098,30 +1224,29 @@ class AIChat:
         ]
 
         # Add OpenRouter specific information if applicable
-        usage_info = []
-        if self.provider == 'openrouter':
-            usage_info.extend([
-                "\n[bold cyan]Usage Information:[/bold cyan]"
-            ])
-            
-            # Calculate total tokens and cost
-            total_prompt_tokens = 0
-            total_completion_tokens = 0
-            total_cost = 0
-            
-            # Iterate through message history to sum up costs
-            for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
-                if hasattr(self, f'last_tokens_prompt_{i}'):
-                    total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
-                    total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
-                    total_cost += getattr(self, f'last_total_cost_{i}', 0)
-
+        usage_info = ["\n[bold cyan]Usage Information:[/bold cyan]"]
+        
+        # Calculate total tokens and cost
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cost = 0
+        
+        # Iterate through message history to sum up costs
+        for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
+            if hasattr(self, f'last_tokens_prompt_{i}'):
+                total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                total_cost += getattr(self, f'last_total_cost_{i}', 0)
+        
+        if total_prompt_tokens > 0 or total_completion_tokens > 0:
             usage_info.extend([
                 f"  Total Prompt Tokens: {total_prompt_tokens}",
                 f"  Total Completion Tokens: {total_completion_tokens}",
                 f"  Total Tokens: {total_prompt_tokens + total_completion_tokens}",
                 f"  Total Cost: ${total_cost:.6f}" if total_cost > 0 else "  Total Cost: Free"
             ])
+        else:
+            usage_info.append("  No token usage data available")
 
         # Add agent information if available
         agent_info = []
@@ -1144,3 +1269,189 @@ class AIChat:
                 padding=(1, 2)
             )
         ) 
+
+    def _calculate_openai_cost(self, prompt_tokens, completion_tokens, model_id):
+        """Calculate cost for OpenAI models based on latest pricing
+        Rates from https://openai.com/api/pricing/
+        
+        o1 (All versions):
+        - Input: $15.00/1M tokens ($0.015 per 1K)
+        - Output: $60.00/1M tokens ($0.06 per 1K)
+        Note: Output includes internal reasoning tokens
+        
+        o1-mini (All versions):
+        - Input: $3.00/1M tokens ($0.003 per 1K)
+        - Output: $12.00/1M tokens ($0.012 per 1K)
+        Note: Output includes internal reasoning tokens
+        
+        GPT-4o (All versions):
+        - Input: $2.50/1M tokens ($0.0025 per 1K)
+        - Output: $10.00/1M tokens ($0.01 per 1K)
+        - Audio Input: $100.00/1M tokens ($0.10 per 1K)
+        - Audio Output: $200.00/1M tokens ($0.20 per 1K)
+        
+        GPT-4o mini:
+        - Input: $0.150/1M tokens ($0.00015 per 1K)
+        - Output: $0.600/1M tokens ($0.0006 per 1K)
+        - Audio Input: $10.000/1M tokens ($0.01 per 1K)
+        - Audio Output: $20.000/1M tokens ($0.02 per 1K)
+        
+        chatgpt-4o-latest:
+        - Input: $5.00/1M tokens ($0.005 per 1K)
+        - Output: $15.00/1M tokens ($0.015 per 1K)
+        
+        GPT-4 Models:
+        - GPT-4 Turbo (all versions): $10.00/1M input, $30.00/1M output
+        - GPT-4 Base: $30.00/1M input, $60.00/1M output
+        - GPT-4-32k: $60.00/1M input, $120.00/1M output
+        - GPT-4 Vision Preview: $10.00/1M input, $30.00/1M output
+        
+        GPT-3.5 Models:
+        - GPT-3.5 Turbo (0125): $0.50/1M input, $1.50/1M output
+        - GPT-3.5 Turbo Instruct: $1.50/1M input, $2.00/1M output
+        - GPT-3.5 Turbo (1106): $1.00/1M input, $2.00/1M output
+        - GPT-3.5 Turbo (0613): $1.50/1M input, $2.00/1M output
+        - GPT-3.5 Turbo 16k: $3.00/1M input, $4.00/1M output
+        - GPT-3.5 Turbo (0301): $1.50/1M input, $2.00/1M output
+        
+        Base Models:
+        - Davinci-002: $2.00/1M tokens (both input/output)
+        - Babbage-002: $0.40/1M tokens (both input/output)
+        """
+        # o1 pricing (all versions including preview and dated versions)
+        if any(x in model_id for x in ["o1-2024-", "o1-preview", "o1"]) and "mini" not in model_id:
+            prompt_cost = 0.015 * (prompt_tokens / 1000)  # $15.00 per 1M tokens
+            completion_cost = 0.06 * (completion_tokens / 1000)  # $60.00 per 1M tokens
+        
+        # o1-mini pricing (all versions)
+        elif "o1-mini" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.012 * (completion_tokens / 1000)  # $12.00 per 1M tokens
+        
+        # GPT-4o pricing (all versions including 2024-11-20, 2024-08-06)
+        elif any(x in model_id for x in ["gpt-4o-2024-", "gpt-4o"]) and "mini" not in model_id:
+            if "audio" in model_id:
+                # Audio model pricing
+                prompt_cost = 0.10 * (prompt_tokens / 1000)  # $100.00 per 1M tokens
+                completion_cost = 0.20 * (completion_tokens / 1000)  # $200.00 per 1M tokens
+            else:
+                # Standard text model pricing
+                prompt_cost = 0.0025 * (prompt_tokens / 1000)  # $2.50 per 1M tokens
+                completion_cost = 0.01 * (completion_tokens / 1000)  # $10.00 per 1M tokens
+        
+        # GPT-4o mini pricing (all versions)
+        elif "gpt-4o-mini" in model_id:
+            if "audio" in model_id:
+                # Audio model pricing
+                prompt_cost = 0.01 * (prompt_tokens / 1000)  # $10.00 per 1M tokens
+                completion_cost = 0.02 * (completion_tokens / 1000)  # $20.00 per 1M tokens
+            else:
+                # Standard text model pricing
+                prompt_cost = 0.00015 * (prompt_tokens / 1000)  # $0.150 per 1M tokens
+                completion_cost = 0.0006 * (completion_tokens / 1000)  # $0.600 per 1M tokens
+        
+        # chatgpt-4o-latest pricing
+        elif "chatgpt-4o-latest" in model_id:
+            prompt_cost = 0.005 * (prompt_tokens / 1000)  # $5.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # GPT-4 32k pricing
+        elif "gpt-4-32k" in model_id:
+            prompt_cost = 0.06 * (prompt_tokens / 1000)  # $60.00 per 1M tokens
+            completion_cost = 0.12 * (completion_tokens / 1000)  # $120.00 per 1M tokens
+        
+        # GPT-4 Turbo pricing (including all preview versions)
+        elif any(x in model_id for x in ["gpt-4-turbo", "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4-vision-preview"]):
+            prompt_cost = 0.01 * (prompt_tokens / 1000)  # $10.00 per 1M tokens
+            completion_cost = 0.03 * (completion_tokens / 1000)  # $30.00 per 1M tokens
+        
+        # Base GPT-4 pricing
+        elif "gpt-4" in model_id:
+            prompt_cost = 0.03 * (prompt_tokens / 1000)  # $30.00 per 1M tokens
+            completion_cost = 0.06 * (completion_tokens / 1000)  # $60.00 per 1M tokens
+        
+        # GPT-3.5 Turbo 16k pricing
+        elif "gpt-3.5-turbo-16k" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.004 * (completion_tokens / 1000)  # $4.00 per 1M tokens
+        
+        # GPT-3.5 Turbo 0125 pricing (latest)
+        elif "gpt-3.5-turbo-0125" in model_id:
+            prompt_cost = 0.0005 * (prompt_tokens / 1000)  # $0.50 per 1M tokens
+            completion_cost = 0.0015 * (completion_tokens / 1000)  # $1.50 per 1M tokens
+        
+        # GPT-3.5 Turbo 1106 pricing
+        elif "gpt-3.5-turbo-1106" in model_id:
+            prompt_cost = 0.001 * (prompt_tokens / 1000)  # $1.00 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # GPT-3.5 Turbo Instruct pricing
+        elif "gpt-3.5-turbo-instruct" in model_id:
+            prompt_cost = 0.0015 * (prompt_tokens / 1000)  # $1.50 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # GPT-3.5 Turbo older versions (0613, 0301)
+        elif "gpt-3.5-turbo" in model_id:
+            prompt_cost = 0.0015 * (prompt_tokens / 1000)  # $1.50 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # Davinci-002 pricing
+        elif "davinci-002" in model_id:
+            prompt_cost = 0.002 * (prompt_tokens / 1000)  # $2.00 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # Babbage-002 pricing
+        elif "babbage-002" in model_id:
+            prompt_cost = 0.0004 * (prompt_tokens / 1000)  # $0.40 per 1M tokens
+            completion_cost = 0.0004 * (completion_tokens / 1000)  # $0.40 per 1M tokens
+        
+        # Default to GPT-3.5 Turbo 0125 pricing for unknown models
+        else:
+            prompt_cost = 0.0005 * (prompt_tokens / 1000)  # $0.50 per 1M tokens
+            completion_cost = 0.0015 * (completion_tokens / 1000)  # $1.50 per 1M tokens
+        
+        return prompt_cost + completion_cost 
+
+    def _calculate_anthropic_cost(self, prompt_tokens, completion_tokens, model_id):
+        """Calculate cost for Anthropic models based on latest pricing
+        
+        Claude 3.5 Models:
+        - Claude 3.5 Sonnet: $3.00/1M input, $15.00/1M output
+        - Claude 3.5 Haiku: $0.80/1M input, $4.00/1M output
+        
+        Claude 3 Models:
+        - Claude 3 Opus: $15.00/1M input, $75.00/1M output
+        - Claude 3 Sonnet: $3.00/1M input, $15.00/1M output
+        - Claude 3 Haiku: $0.25/1M input, $1.25/1M output
+        """
+        # Claude 3.5 Sonnet pricing
+        if "claude-3-5-sonnet" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # Claude 3.5 Haiku pricing
+        elif "claude-3-5-haiku" in model_id:
+            prompt_cost = 0.0008 * (prompt_tokens / 1000)  # $0.80 per 1M tokens
+            completion_cost = 0.004 * (completion_tokens / 1000)  # $4.00 per 1M tokens
+        
+        # Claude 3 Opus pricing
+        elif "claude-3-opus" in model_id:
+            prompt_cost = 0.015 * (prompt_tokens / 1000)  # $15.00 per 1M tokens
+            completion_cost = 0.075 * (completion_tokens / 1000)  # $75.00 per 1M tokens
+        
+        # Claude 3 Sonnet pricing
+        elif "claude-3-sonnet" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # Claude 3 Haiku pricing
+        elif "claude-3-haiku" in model_id:
+            prompt_cost = 0.00025 * (prompt_tokens / 1000)  # $0.25 per 1M tokens
+            completion_cost = 0.00125 * (completion_tokens / 1000)  # $1.25 per 1M tokens
+        
+        # Default to Claude 3 Sonnet pricing for unknown models
+        else:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        return prompt_cost + completion_cost 
