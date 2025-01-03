@@ -343,6 +343,12 @@ class AIChat:
                     elif ref.startswith('dir:'):
                         ref_type = 'dir'
                         ref_path = ref[4:].strip()
+                    elif ref.startswith('img:'):
+                        ref_type = 'image'
+                        ref_path = ref[4:].strip()
+                        # Remove quotes if present
+                        if ref_path.startswith('"') and ref_path.endswith('"'):
+                            ref_path = ref_path[1:-1]
                     
                     if ref_type:
                         # Process file and directory references
@@ -358,6 +364,21 @@ class AIChat:
                                 "type": "text",
                                 "text": result
                             })
+                        elif ref_type == "image":
+                            success, result = encode_image_to_base64(ref_path)
+                            if success:
+                                mime_type = get_image_mime_type(ref_path)
+                                content.append({
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{mime_type};base64,{result}"
+                                    }
+                                })
+                            else:
+                                content.append({
+                                    "type": "text",
+                                    "text": f"Error processing image: {result}"
+                                })
                         else:
                             content.append({
                                 "type": "reference",
@@ -401,9 +422,23 @@ class AIChat:
                     anthropic_messages = []
                     for msg in messages[1:]:
                         if isinstance(msg["content"], list):
+                            # Handle messages with mixed content (text, images, etc.)
+                            content_parts = []
+                            for part in msg["content"]:
+                                if part["type"] == "text":
+                                    content_parts.append({"type": "text", "text": part["text"]})
+                                elif part["type"] == "image_url":
+                                    content_parts.append({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": part["image_url"]["url"].split(";")[0].split(":")[1],
+                                            "data": part["image_url"]["url"].split(",")[1]
+                                        }
+                                    })
                             anthropic_messages.append({
                                 "role": "user" if msg["role"] == "user" else "assistant",
-                                "content": msg["content"]
+                                "content": content_parts
                             })
                         else:
                             anthropic_messages.append({
@@ -480,8 +515,11 @@ class AIChat:
                             for part in msg["content"]:
                                 if part["type"] == "text":
                                     content_parts.append({"type": "text", "text": part["text"]})
-                                elif part["type"] == "image":
-                                    content_parts.append({"type": "image_url", "image_url": part["image_url"]})
+                                elif part["type"] == "image_url":
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": part["image_url"]["url"]
+                                    })
                             formatted_messages.append({"role": msg["role"], "content": content_parts})
                         else:
                             # Handle simple text messages
@@ -1059,8 +1097,11 @@ class AIChat:
                             self.logger.info("Chat session ended by user (bye command)")
                             exit_chat("Chat session ended. Thanks for using ACT!")
                             break
-                        elif command == '/save':
-                            self.save_chat()
+                        elif command.startswith('/save'):
+                            # Extract name if provided
+                            parts = command.split(maxsplit=1)
+                            custom_name = parts[1] if len(parts) > 1 else None
+                            self.save_chat(custom_name)
                             continue
                         elif command == '/clear':
                             os.system('cls' if os.name == 'nt' else 'clear')

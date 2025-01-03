@@ -47,3 +47,4 @@ settings.json
 run.bat
 chroma_stores/
 act_stats.db
+.codegpt
