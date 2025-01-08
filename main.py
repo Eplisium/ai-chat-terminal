@@ -506,10 +506,13 @@ class AIChatApp:
             else:
                 agent_status = "⭕ Disabled"
 
+            # Get current instruction name
+            current_instruction = self.instructions_manager.get_current_name()
+
             choices = [
                 ("═══ AI Settings ═══", None),
                 (f"🤖 Agent           〈{agent_status}〉", "agent"),
-                ("🤖 System Instructions", "instructions"),
+                (f"🤖 System Instructions 〈{current_instruction}〉", "instructions"),
                 ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
             ]
