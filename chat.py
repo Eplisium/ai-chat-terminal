@@ -90,6 +90,7 @@ class AIChat:
         self.settings_manager = settings_manager
         self.chroma_manager = chroma_manager
         self.stats_manager = stats_manager
+        self.session_id = None  # Track current session ID
         dotenv.load_dotenv()
 
         self.model_id = model_config['id']
@@ -981,13 +982,16 @@ class AIChat:
             return False
 
     def chat_loop(self):
-        """Main chat interaction loop"""
-        self.logger.info(f"Starting chat loop for {self.model_name}")
-        
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
+        """Main chat loop"""
         def display_welcome():
-            """Display welcome message and menu"""
+            # Start a new chat session
+            if self.stats_manager:
+                self.session_id = self.stats_manager.record_session_start({
+                    'id': self.model_id,
+                    'name': self.model_name,
+                    'provider': self.provider
+                })
+
             # Display ACT logo
             logo = """[bold cyan]
     ╔═══╗╔═══╗╔════╗
@@ -1093,8 +1097,14 @@ class AIChat:
                     if user_input.strip().startswith('/') or user_input.strip().lower() == 'bye':
                         command = user_input.strip().lower()
                         
+                        # Record command message
+                        if self.stats_manager:
+                            self.stats_manager.record_chat(self.model_id, "sent", is_command=True)
+                        
                         if command == 'bye':
                             self.logger.info("Chat session ended by user (bye command)")
+                            if self.stats_manager and self.session_id:
+                                self.stats_manager.record_session_end(self.session_id)
                             exit_chat("Chat session ended. Thanks for using ACT!")
                             break
                         elif command.startswith('/save'):
@@ -1143,6 +1153,8 @@ class AIChat:
                                 continue
                         elif command == '/end':
                             self.logger.info("Chat session ended by user (/end command)")
+                            if self.stats_manager and self.session_id:
+                                self.stats_manager.record_session_end(self.session_id)
                             exit_chat("Chat session ended. Thanks for using ACT!")
                             break
                         elif command == '/help':
@@ -1160,18 +1172,24 @@ class AIChat:
                 
                 except KeyboardInterrupt:
                     self.logger.warning("Chat interrupted by user")
+                    if self.stats_manager and self.session_id:
+                        self.stats_manager.record_session_end(self.session_id)
                     self.console.print("\n")  # Add newline for cleaner output
                     exit_chat("Chat interrupted. Thanks for using ACT!")
                     break
                 except Exception as e:
                     self.logger.error(f"Error in chat loop: {e}", exc_info=True)
+                    if self.stats_manager and self.session_id:
+                        self.stats_manager.record_session_end(self.session_id)
                     self.console.print(f"[bold red]Error: {str(e)}[/bold red]")
                     continue
         
         except Exception as e:
             self.logger.error(f"Fatal error in chat loop: {e}", exc_info=True)
+            if self.stats_manager and self.session_id:
+                self.stats_manager.record_session_end(self.session_id)
             self.console.print(f"[bold red]Fatal error: {e}[/bold red]")
-            exit_chat("Exiting due to error. Sorry for the inconvenience!") 
+            exit_chat("Exiting due to error")
 
     def _display_help(self):
         """Display detailed help information"""
