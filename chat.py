@@ -408,7 +408,7 @@ class AIChat:
             # Check if the message is a command
             if isinstance(user_input, str):
                 user_input_lower = user_input.strip().lower()
-                if user_input_lower in ['bye', '/end', '/info', '/help', '/clear', '/save', '/insert']:
+                if user_input_lower in ['bye', 'exit', 'quit', 'cya', 'adios', '/end', '/info', '/help', '/clear', '/save', '/insert']:
                     return None
             
             # Record sent message only when we're about to make the API call
@@ -1094,15 +1094,15 @@ class AIChat:
                     user_input = self.console.input("[bold yellow]You: [/bold yellow]")
                     
                     # Check for commands
-                    if user_input.strip().startswith('/') or user_input.strip().lower() == 'bye':
+                    if user_input.strip().startswith('/') or user_input.strip().lower() in ['bye', 'exit', 'quit', 'cya', 'adios']:
                         command = user_input.strip().lower()
                         
                         # Record command message
                         if self.stats_manager:
                             self.stats_manager.record_chat(self.model_id, "sent", is_command=True)
                         
-                        if command == 'bye':
-                            self.logger.info("Chat session ended by user (bye command)")
+                        if command in ['bye', 'exit', 'quit', 'cya', 'adios']:
+                            self.logger.info(f"Chat session ended by user ({command} command)")
                             if self.stats_manager and self.session_id:
                                 self.stats_manager.record_session_end(self.session_id)
                             exit_chat("Chat session ended. Thanks for using ACT!")
