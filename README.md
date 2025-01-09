@@ -10,6 +10,20 @@
 
 </div>
 
+## 📑 Table of Contents
+- [Key Features](#-key-features)
+  - [AI Integration](#-ai-integration)
+  - [Agent System](#-agent-system)
+  - [Document Support](#-document-support)
+  - [Chat Interface](#-chat-interface)
+  - [Chat History](#-chat-history)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Agent Setup](#agent-setup)
+- [Usage](#-usage)
+- [License](#-license)
+
 ## ✨ Key Features
 
 ### 🤖 AI Integration
@@ -82,8 +96,9 @@
   | Command | Description |
   |---------|-------------|
   | `/help` | Show help guide |
-  | `/save [name]` | Save chat history |
   | `/info` | Display chat session info |
+  | `/fav` | Toggle favorite model |
+  | `/save [name]` | Save chat history |
   | `/clear` | Clear screen |
   | `/insert` | Multi-line input |
   | `/end` | End session |
