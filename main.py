@@ -562,7 +562,6 @@ class AIChatApp:
                     ("Create New Store", "create"),
                     ("Select Store", "select"),
                     ("Delete Store", "delete"),
-                    ("Process Directory", "process"),
                 ])
 
                 if self.chroma_manager and self.chroma_manager.store_name:
@@ -598,7 +597,7 @@ class AIChatApp:
                 new_status = "enabled" if not agent_enabled else "disabled"
                 icon = "🟡" if not agent_enabled else "⭕"
                 self.console.print(f"{icon} Agent {new_status}")
-                return True  # Return True to indicate menu should be refreshed
+                continue  # Continue the loop instead of returning
 
             elif answer['action'] == "test_embeddings":
                 if not self.chroma_manager:
@@ -840,17 +839,8 @@ class AIChatApp:
                         self.chroma_manager.unload_store()
                     elif store_answer['store']:
                         if self.chroma_manager.load_store(store_answer['store']):
-                            if inquirer.confirm("Would you like to process a directory now?", default=False):
-                                dir_question = [
-                                    inquirer.Text('directory',
-                                        message="Enter directory path to process",
-                                        default="."
-                                    )
-                                ]
-                                dir_answer = inquirer.prompt(dir_question)
-                                if dir_answer:
-                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                            if inquirer.confirm("Would you like to refresh the store to check for new files?", default=False):
+                                self.chroma_manager.refresh_store()
 
             elif answer['action'] == "delete":
                 stores = self.chroma_manager.list_stores()
@@ -878,22 +868,6 @@ class AIChatApp:
                     if confirm:
                         if self.chroma_manager.delete_store(store_answer['store']):
                             self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
-
-            elif answer['action'] == "process":
-                if not self.chroma_manager.store_name:
-                    self.console.print("[yellow]Please select a store first[/yellow]")
-                    continue
-
-                dir_question = [
-                    inquirer.Text('directory',
-                        message="Enter directory path to process",
-                        default="."
-                    )
-                ]
-                dir_answer = inquirer.prompt(dir_question)
-                if dir_answer:
-                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
 
             elif answer['action'] == "test":
                 query = inquirer.text(message="Enter a test query")
@@ -1015,7 +989,6 @@ class AIChatApp:
                 choices.extend([
                     ("Select Store", "select"),
                     ("Delete Store", "delete"),
-                    ("Process Directory", "process"),
                 ])
 
             if current_store:
@@ -1088,17 +1061,8 @@ class AIChatApp:
                         self.chroma_manager.unload_store()
                     elif store_answer['store']:
                         if self.chroma_manager.load_store(store_answer['store']):
-                            if inquirer.confirm("Would you like to process a directory now?", default=False):
-                                dir_question = [
-                                    inquirer.Text('directory',
-                                        message="Enter directory path to process",
-                                        default="."
-                                    )
-                                ]
-                                dir_answer = inquirer.prompt(dir_question)
-                                if dir_answer:
-                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                            if inquirer.confirm("Would you like to refresh the store to check for new files?", default=False):
+                                self.chroma_manager.refresh_store()
 
             elif answer['action'] == "delete" and stores:
                 store_choices = [(store, store) for store in stores]
@@ -1123,35 +1087,6 @@ class AIChatApp:
                             self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
                         else:
                             self.console.print("[red]Failed to delete store[/red]")
-
-            elif answer['action'] == "process" and current_store:
-                dir_question = [
-                    inquirer.Text('directory',
-                        message="Enter directory path to process",
-                        default="."
-                    )
-                ]
-                dir_answer = inquirer.prompt(dir_question)
-                if dir_answer:
-                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
-
-            elif answer['action'] == "test" and current_store:
-                query = inquirer.text(message="Enter a test query")
-                if query:
-                    self.console.print("\n[cyan]Searching for relevant context...[/cyan]")
-                    results = self.chroma_manager.search_context(query)
-                    if results:
-                        self.console.print("\n[green]Found relevant files:[/green]")
-                        for i, result in enumerate(results, 1):
-                            self.console.print(Panel(
-                                result,
-                                title=f"[bold cyan]Result {i}[/bold cyan]",
-                                border_style="cyan"
-                            ))
-                    else:
-                        self.console.print("[yellow]No relevant context found[/yellow]")
-                    self.console.input("\nPress Enter to continue...")
 
             elif answer['action'] == "model":
                 self.chroma_manager.select_embedding_model()
