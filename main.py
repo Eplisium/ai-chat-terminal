@@ -196,6 +196,20 @@ class AIChatApp:
 
             if isinstance(answer['favorite'], dict):
                 selected = answer['favorite']
+                
+                # Display model description in a panel with enhanced styling
+                self.console.print()  # Add spacing
+                self.console.print(Panel(
+                    f"[bold white]Provider:[/bold white] [cyan]{selected['provider'].upper()}[/cyan]\n\n"
+                    f"[bold white]Description:[/bold white]\n[cyan]{selected.get('description', 'No description available')}[/cyan]",
+                    title=f"[bold cyan]★ {selected['name']}[/bold cyan]",
+                    title_align="left",
+                    border_style="bright_blue",
+                    padding=(1, 2),
+                    highlight=True
+                ))
+                self.console.print()  # Add spacing
+                
                 action_choices = [
                     ("Start Chat", "chat"),
                     ("Remove from Favorites", "remove"),
@@ -1337,6 +1351,19 @@ class AIChatApp:
     
     def _handle_model_selection(self, selected_model):
         """Handle the model selection and subsequent actions"""
+        # Display model description in a panel with enhanced styling
+        self.console.print()  # Add spacing
+        self.console.print(Panel(
+            f"[bold white]Provider:[/bold white] [cyan]{selected_model.get('provider', 'unknown').upper()}[/cyan]\n\n"
+            f"[bold white]Description:[/bold white]\n[cyan]{selected_model.get('description', 'No description available')}[/cyan]",
+            title=f"[bold cyan]★ {selected_model['name']}[/bold cyan]",
+            title_align="left",
+            border_style="bright_blue",
+            padding=(1, 2),
+            highlight=True
+        ))
+        self.console.print()  # Add spacing
+        
         action_choices = [
             ("Start Chat", "chat"),
             ("Add to Favorites", "favorite"),
