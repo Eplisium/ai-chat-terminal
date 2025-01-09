@@ -1351,12 +1351,16 @@ class AIChatApp:
     
     def _handle_model_selection(self, selected_model):
         """Handle the model selection and subsequent actions"""
+        # Check if model is in favorites
+        is_favorite = any(f['id'] == selected_model['id'] for f in self.favorites)
+        icon = "★" if is_favorite else "○"
+        
         # Display model description in a panel with enhanced styling
         self.console.print()  # Add spacing
         self.console.print(Panel(
             f"[bold white]Provider:[/bold white] [cyan]{selected_model.get('provider', 'unknown').upper()}[/cyan]\n\n"
             f"[bold white]Description:[/bold white]\n[cyan]{selected_model.get('description', 'No description available')}[/cyan]",
-            title=f"[bold cyan]★ {selected_model['name']}[/bold cyan]",
+            title=f"[bold cyan]{icon} {selected_model['name']}[/bold cyan]",
             title_align="left",
             border_style="bright_blue",
             padding=(1, 2),
