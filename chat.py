@@ -1,6 +1,4 @@
 from imports import *
-import threading
-import signal
 from utils import log_api_response, encode_image_to_base64, get_image_mime_type, read_document_content, sanitize_path
 
 def get_openrouter_headers(api_key):
