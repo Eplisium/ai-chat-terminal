@@ -547,6 +547,7 @@ class AIChatApp:
         while True:
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
+            streaming_enabled = settings.get('streaming', {}).get('enabled', False)
             agent_active = (
                 agent_enabled and 
                 self.chroma_manager and 
@@ -562,12 +563,16 @@ class AIChatApp:
             else:
                 agent_status = "⭕ Disabled"
 
+            # Get streaming status
+            streaming_status = "🟢 Enabled" if streaming_enabled else "⭕ Disabled"
+
             # Get current instruction name
             current_instruction = self.instructions_manager.get_current_name()
 
             choices = [
                 ("═══ AI Settings ═══", None),
                 (f"🤖 Agent           〈{agent_status}〉", "agent"),
+                (f"🤖 Streaming Mode   〈{streaming_status}〉", "streaming"),
                 (f"🤖 System Instructions 〈{current_instruction}〉", "instructions"),
                 ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
@@ -587,6 +592,16 @@ class AIChatApp:
 
             if answer['setting'] == "agent":
                 self.manage_agent_settings(agent_status)
+            elif answer['setting'] == "streaming":
+                # Toggle streaming mode
+                settings = self._load_settings()
+                if 'streaming' not in settings:
+                    settings['streaming'] = {}
+                settings['streaming']['enabled'] = not streaming_enabled
+                self._save_settings(settings)
+                new_status = "enabled" if not streaming_enabled else "disabled"
+                icon = "🟢" if not streaming_enabled else "⭕"
+                self.console.print(f"{icon} Streaming mode {new_status}")
             elif answer['setting'] == "instructions":
                 self.manage_instructions()
             elif answer['setting'] == "contexts":
@@ -1438,16 +1453,29 @@ class AIChatApp:
                         settings['agent'] = {
                             'enabled': False
                         }
-                        self._save_settings(settings)
+                    
+                    # Ensure streaming settings exist with defaults
+                    if 'streaming' not in settings:
+                        settings['streaming'] = {
+                            'enabled': False
+                        }
+                        
+                    self._save_settings(settings)
                     return settings
             return {
                 'agent': {
+                    'enabled': False
+                },
+                'streaming': {
                     'enabled': False
                 }
             }
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
-            return {'agent': {'enabled': False}}
+            return {
+                'agent': {'enabled': False},
+                'streaming': {'enabled': False}
+            }
 
     def _save_settings(self, settings: Dict) -> None:
         """Save settings to file"""

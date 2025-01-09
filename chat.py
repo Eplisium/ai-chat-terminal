@@ -1,5 +1,6 @@
 from imports import *
 import threading
+import signal
 from utils import log_api_response, encode_image_to_base64, get_image_mime_type, read_document_content, sanitize_path
 
 def get_openrouter_headers(api_key):
@@ -101,6 +102,12 @@ class AIChat:
         self.start_time = datetime.now()
         self.last_save_path = None  # Track last save location
         self.last_save_name = None  # Track last used custom name
+        
+        # Get streaming setting
+        self.streaming_enabled = False
+        if self.settings_manager:
+            settings = self.settings_manager._load_settings()
+            self.streaming_enabled = settings.get('streaming', {}).get('enabled', False)
         
         # Handle system instruction name and content
         if isinstance(system_instruction, dict):
@@ -440,13 +447,27 @@ class AIChat:
             timer_thread = threading.Thread(target=update_thinking_message)
             timer_thread.daemon = True
             timer_thread.start()
+
+            # Variables for streaming response
+            partial_response = ""
+            interrupted = False
+            original_handler = signal.getsignal(signal.SIGINT)
+
+            def signal_handler(signum, frame):
+                nonlocal interrupted
+                interrupted = True
+                # Restore original handler for next Ctrl+C
+                signal.signal(signal.SIGINT, original_handler)
             
             try:
+                # Set up Ctrl+C handler if streaming is enabled
+                if self.streaming_enabled:
+                    signal.signal(signal.SIGINT, signal_handler)
+                
                 if self.provider == 'anthropic':
                     anthropic_messages = []
                     for msg in messages[1:]:
                         if isinstance(msg["content"], list):
-                            # Handle messages with mixed content (text, images, etc.)
                             content_parts = []
                             for part in msg["content"]:
                                 if part["type"] == "text":
@@ -475,63 +496,61 @@ class AIChat:
                         "messages": anthropic_messages,
                         "system": self.messages[0]['content'],
                         "temperature": 0.7,
-                        "max_tokens": self.max_tokens if self.max_tokens else 4096  # Always provide max_tokens
+                        "max_tokens": self.max_tokens if self.max_tokens else 4096,
+                        "stream": self.streaming_enabled
                     }
                     
-                    response = self.client.messages.create(**request_data)
-                    log_api_response("Anthropic", request_data, response)
-                    ai_response = response.content[0].text
-
-                    # Record received message with token count and cost
-                    if self.stats_manager:
-                        token_count = None
-                        prompt_tokens = None
-                        completion_tokens = None
-                        cost = 0
+                    if self.streaming_enabled:
+                        response = self.client.messages.create(**request_data)
+                        for chunk in response:
+                            if interrupted:
+                                break
+                            if chunk.type == "content_block_delta":
+                                partial_response += chunk.delta.text or ""
                         
-                        # Handle new Anthropic API response format
+                        # Get token usage with a separate non-streaming request
+                        if not interrupted:
+                            request_data["stream"] = False
+                            final_response = self.client.messages.create(**request_data)
+                            log_api_response("Anthropic", request_data, final_response)
+                            
+                            if hasattr(final_response, 'usage'):
+                                self.last_tokens_prompt = final_response.usage.input_tokens
+                                self.last_tokens_completion = final_response.usage.output_tokens
+                                self.last_total_cost = self._calculate_anthropic_cost(
+                                    self.last_tokens_prompt,
+                                    self.last_tokens_completion,
+                                    self.model_id
+                                )
+                                
+                                msg_index = len(self.messages) - 1
+                                setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                                setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                                setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                    else:
+                        # Non-streaming mode
+                        response = self.client.messages.create(**request_data)
+                        log_api_response("Anthropic", request_data, response)
+                        partial_response = response.content[0].text
+                        
                         if hasattr(response, 'usage'):
-                            prompt_tokens = response.usage.input_tokens
-                            completion_tokens = response.usage.output_tokens
-                            token_count = prompt_tokens + completion_tokens
-                            cost = self._calculate_anthropic_cost(prompt_tokens, completion_tokens, self.model_id)
+                            self.last_tokens_prompt = response.usage.input_tokens
+                            self.last_tokens_completion = response.usage.output_tokens
+                            self.last_total_cost = self._calculate_anthropic_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
                             
-                            # Store for display
-                            self.last_total_cost = cost
-                            self.last_tokens_prompt = prompt_tokens
-                            self.last_tokens_completion = completion_tokens
-                            
-                            # Store per-message stats
                             msg_index = len(self.messages) - 1
-                            setattr(self, f'last_total_cost_{msg_index}', cost)
-                            setattr(self, f'last_tokens_prompt_{msg_index}', prompt_tokens)
-                            setattr(self, f'last_tokens_completion_{msg_index}', completion_tokens)
-                        
-                        self.stats_manager.record_chat(
-                            self.model_id, 
-                            "received", 
-                            token_count=token_count,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            cost=cost
-                        )
-                        
-                        # Update model usage cost
-                        self.stats_manager.record_model_usage(
-                            {
-                                'id': self.model_id,
-                                'name': self.model_name,
-                                'provider': self.provider
-                            },
-                            total_cost=cost
-                        )
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
 
                 elif self.provider == 'openrouter':
-                    # Format messages for OpenRouter API
                     formatted_messages = []
                     for msg in messages:
                         if isinstance(msg["content"], list):
-                            # Handle messages with mixed content (text, images, etc.)
                             content_parts = []
                             for part in msg["content"]:
                                 if part["type"] == "text":
@@ -543,40 +562,55 @@ class AIChat:
                                     })
                             formatted_messages.append({"role": msg["role"], "content": content_parts})
                         else:
-                            # Handle simple text messages
                             formatted_messages.append({"role": msg["role"], "content": msg["content"]})
 
                     request_data = {
                         "model": self.model_id,
                         "messages": formatted_messages,
                         "temperature": 0.7,
-                        "stream": False
+                        "stream": self.streaming_enabled
                     }
 
-                    response = requests.post(
-                        f"{self.api_base}/chat/completions",
-                        headers=get_openrouter_headers(self.api_key),
-                        json=request_data
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    log_api_response("OpenRouter", request_data, data)
-                    
-                    # Handle response based on whether it's a chat completion or image analysis
-                    if "choices" in data:
-                        ai_response = data['choices'][0]['message']['content'].strip()
-                    else:
-                        # Handle case where response doesn't have choices (e.g., image analysis)
-                        ai_response = data.get('content', "No response content available").strip()
-                    
-                    # Get the generation ID from the response
-                    generation_id = data.get('id')
-                    if generation_id:
-                        # Add a small delay to ensure cost data is available
-                        time.sleep(0.5)
+                    data = None  # Initialize data variable
+                    if self.streaming_enabled:
+                        response = requests.post(
+                            f"{self.api_base}/chat/completions",
+                            headers=get_openrouter_headers(self.api_key),
+                            json=request_data,
+                            stream=True
+                        )
+                        response.raise_for_status()
                         
-                        # Try multiple times to get the cost data
+                        for line in response.iter_lines():
+                            if interrupted:
+                                break
+                            if line:
+                                line = line.decode('utf-8')
+                                if line.startswith('data: '):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
+                                            partial_response += chunk['choices'][0]['delta']['content']
+                                        # Store the last chunk as data for token counting
+                                        data = chunk
+                                    except json.JSONDecodeError:
+                                        continue
+                    else:
+                        # Non-streaming mode
+                        response = requests.post(
+                            f"{self.api_base}/chat/completions",
+                            headers=get_openrouter_headers(self.api_key),
+                            json=request_data
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        log_api_response("OpenRouter", request_data, data)
+                        partial_response = data['choices'][0]['message']['content'].strip()
+
+                    # Get token usage with a separate request
+                    if data and data.get('id'):
+                        generation_id = data['id']
+                        time.sleep(0.5)
                         max_retries = 3
                         retry_delay = 0.5
                         
@@ -586,18 +620,15 @@ class AIChat:
                                     f"{self.api_base}/generation?id={generation_id}",
                                     headers=get_openrouter_headers(self.api_key)
                                 )
-                                generation_response.raise_for_status()
                                 generation_data = generation_response.json()
                                 
                                 if 'data' in generation_data and generation_data['data'].get('total_cost') is not None:
-                                    # Store the accurate cost information
                                     self.last_total_cost = generation_data['data']['total_cost']
                                     self.last_tokens_prompt = generation_data['data'].get('tokens_prompt', 0)
                                     self.last_tokens_completion = generation_data['data'].get('tokens_completion', 0)
                                     self.last_native_tokens_prompt = generation_data['data'].get('native_tokens_prompt', 0)
                                     self.last_native_tokens_completion = generation_data['data'].get('native_tokens_completion', 0)
                                     
-                                    # Store per-message stats
                                     msg_index = len(self.messages) - 1
                                     setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
                                     setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
@@ -605,139 +636,116 @@ class AIChat:
                                     setattr(self, f'last_native_tokens_prompt_{msg_index}', self.last_native_tokens_prompt)
                                     setattr(self, f'last_native_tokens_completion_{msg_index}', self.last_native_tokens_completion)
                                     break
-                                else:
-                                    if attempt < max_retries - 1:
-                                        time.sleep(retry_delay)
-                                        continue
-                                    else:
-                                        # If we still don't have cost data, try to calculate from usage
-                                        if 'usage' in data:
-                                            usage = data['usage']
-                                            self.last_tokens_prompt = usage.get('prompt_tokens', 0)
-                                            self.last_tokens_completion = usage.get('completion_tokens', 0)
-                                            self.last_total_cost = 0  # We don't have accurate cost data
-                            except Exception as e:
-                                self.logger.error(f"Error fetching generation stats (attempt {attempt + 1}): {e}")
+                            except Exception:
                                 if attempt < max_retries - 1:
                                     time.sleep(retry_delay)
                                     continue
-                                else:
-                                    self.last_total_cost = 0
-                                    if 'usage' in data:
-                                        usage = data['usage']
-                                        self.last_tokens_prompt = usage.get('prompt_tokens', 0)
-                                        self.last_tokens_completion = usage.get('completion_tokens', 0)
-
-                    # Record received message with token and cost information
-                    if self.stats_manager:
-                        token_count = None
-                        prompt_tokens = None
-                        completion_tokens = None
-                        cost = 0
-                        
-                        if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
-                            token_count = self.last_tokens_prompt + self.last_tokens_completion
-                            prompt_tokens = self.last_tokens_prompt
-                            completion_tokens = self.last_tokens_completion
-                        
-                        if hasattr(self, 'last_total_cost'):
-                            cost = self.last_total_cost
-                        
-                        self.stats_manager.record_chat(
-                            self.model_id, 
-                            "received", 
-                            token_count=token_count,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            cost=cost
-                        )
-                        
-                        # Update model usage cost
-                        self.stats_manager.record_model_usage(
-                            {
-                                'id': self.model_id,
-                                'name': self.model_name,
-                                'provider': self.provider
-                            },
-                            total_cost=cost
-                        )
 
                 else:  # OpenAI
                     request_data = {
                         "model": self.model_id,
                         "messages": messages,
                         "temperature": 0.7,
-                        "stream": False
+                        "stream": self.streaming_enabled
                     }
                     
-                    # Add max_tokens only if configured
                     if self.max_tokens:
                         request_data["max_tokens"] = self.max_tokens
 
-                    response = self.client.chat.completions.create(**request_data)
-                    log_api_response("OpenAI", request_data, response)
-                    ai_response = response.choices[0].message.content.strip()
+                    if self.streaming_enabled:
+                        response = self.client.chat.completions.create(**request_data)
+                        for chunk in response:
+                            if interrupted:
+                                break
+                            if chunk.choices[0].delta.content is not None:
+                                partial_response += chunk.choices[0].delta.content
 
-                    # Record received message with token count and cost
-                    if self.stats_manager:
-                        token_count = None
-                        prompt_tokens = None
-                        completion_tokens = None
-                        cost = 0
+                        # Get token usage with a separate non-streaming request
+                        if not interrupted:
+                            request_data["stream"] = False
+                            final_response = self.client.chat.completions.create(**request_data)
+                            log_api_response("OpenAI", request_data, final_response)
+                            
+                            if hasattr(final_response, 'usage'):
+                                self.last_tokens_prompt = final_response.usage.prompt_tokens
+                                self.last_tokens_completion = final_response.usage.completion_tokens
+                                self.last_total_cost = self._calculate_openai_cost(
+                                    self.last_tokens_prompt,
+                                    self.last_tokens_completion,
+                                    self.model_id
+                                )
+                                
+                                msg_index = len(self.messages) - 1
+                                setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                                setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                                setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                    else:
+                        # Non-streaming mode
+                        response = self.client.chat.completions.create(**request_data)
+                        log_api_response("OpenAI", request_data, response)
+                        partial_response = response.choices[0].message.content.strip()
+                        
                         if hasattr(response, 'usage'):
-                            token_count = response.usage.total_tokens
-                            prompt_tokens = response.usage.prompt_tokens
-                            completion_tokens = response.usage.completion_tokens
-                            cost = self._calculate_openai_cost(prompt_tokens, completion_tokens, self.model_id)
+                            self.last_tokens_prompt = response.usage.prompt_tokens
+                            self.last_tokens_completion = response.usage.completion_tokens
+                            self.last_total_cost = self._calculate_openai_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
                             
-                            # Store for display
-                            self.last_total_cost = cost
-                            self.last_tokens_prompt = prompt_tokens
-                            self.last_tokens_completion = completion_tokens
-                            
-                            # Store per-message stats
                             msg_index = len(self.messages) - 1
-                            setattr(self, f'last_total_cost_{msg_index}', cost)
-                            setattr(self, f'last_tokens_prompt_{msg_index}', prompt_tokens)
-                            setattr(self, f'last_tokens_completion_{msg_index}', completion_tokens)
-                        
-                        self.stats_manager.record_chat(
-                            self.model_id, 
-                            "received", 
-                            token_count=token_count,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            cost=cost
-                        )
-                        
-                        # Update model usage cost
-                        self.stats_manager.record_model_usage(
-                            {
-                                'id': self.model_id,
-                                'name': self.model_name,
-                                'provider': self.provider
-                            },
-                            total_cost=cost
-                        )
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
 
-            except Exception as e:
-                log_api_response(self.provider, request_data, None, error=e)
-                raise
             finally:
+                # Restore original signal handler if streaming was enabled
+                if self.streaming_enabled:
+                    signal.signal(signal.SIGINT, original_handler)
+                
                 # Calculate total response time
                 response_time = time.time() - start_time
-                # Store response time for display
                 self.last_response_time = response_time
-                # Stop the timer thread before stopping the thinking message
+                
+                # Stop the timer thread
                 stop_timer.set()
-                timer_thread.join(timeout=1.0)  # Wait for the thread to finish
+                timer_thread.join(timeout=1.0)
                 thinking_message.stop()
+                
+                if interrupted:
+                    self.console.print("\n[yellow]Message interrupted by user[/yellow]")
+                
+                # Record stats if available
+                if self.stats_manager and hasattr(self, 'last_tokens_prompt'):
+                    token_count = self.last_tokens_prompt + self.last_tokens_completion
+                    cost = getattr(self, 'last_total_cost', 0)
+                    
+                    self.stats_manager.record_chat(
+                        self.model_id,
+                        "received",
+                        token_count=token_count,
+                        prompt_tokens=self.last_tokens_prompt,
+                        completion_tokens=self.last_tokens_completion,
+                        cost=cost
+                    )
+                    
+                    self.stats_manager.record_model_usage(
+                        {
+                            'id': self.model_id,
+                            'name': self.model_name,
+                            'provider': self.provider
+                        },
+                        total_cost=cost
+                    )
             
-            self._display_response(ai_response)
-            self.messages.append({"role": "assistant", "content": ai_response})
+            # Display and store the response
+            if partial_response:
+                self._display_response(partial_response.strip())
+                self.messages.append({"role": "assistant", "content": partial_response.strip()})
             
-            return ai_response
-        
+            return partial_response.strip() if partial_response else None
+
         except Exception as e:
             self.logger.error(f"API Error: {e}", exc_info=True)
             self.console.print(f"[bold red]Error: {e}[/bold red]")
@@ -1116,16 +1124,30 @@ class AIChat:
         
         def exit_chat(message="Goodbye!"):
             """Exit chat with animation"""
-            # Show goodbye message with fade effect
-            self.console.print()  # Add a blank line for spacing
-            with self.console.status("[bold cyan]👋[/bold cyan]", spinner="dots") as status:
-                time.sleep(0.5)
-                self.console.print(f"[bold cyan]{message}[/bold cyan]")
-                time.sleep(1)
-            
-            # Clear screen and show main menu
-            os.system('cls' if os.name == 'nt' else 'clear')
-            display_main_menu()
+            try:
+                # Add a blank line for spacing
+                self.console.print()
+                
+                # Clear any active live displays
+                if hasattr(self.console, '_live') and self.console._live:
+                    try:
+                        self.console._live.stop()
+                    except:
+                        pass
+                    self.console._live = None
+                
+                # Show goodbye message with fade effect
+                with self.console.status("[bold cyan]👋[/bold cyan]", spinner="dots") as status:
+                    time.sleep(0.5)
+                    self.console.print(f"[bold cyan]{message}[/bold cyan]")
+                    time.sleep(1)
+                
+                # Clear screen and show main menu
+                os.system('cls' if os.name == 'nt' else 'clear')
+                display_main_menu()
+            except Exception as e:
+                # If anything fails, just print the message
+                self.console.print(f"\n[bold cyan]{message}[/bold cyan]")
         
         # Clear screen and show welcome message at start
         os.system('cls' if os.name == 'nt' else 'clear')
