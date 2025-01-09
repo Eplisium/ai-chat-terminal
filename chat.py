@@ -1025,6 +1025,7 @@ class AIChat:
                 "💾 Commands:\n"
                 "   - /help - Display detailed help guide\n"
                 "   - /info - Display chat session information\n"
+                "   - /fav - Add/remove current model to/from favorites\n"
                 "   - /save [name] - Save the chat history (optional custom name)\n"
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
@@ -1165,6 +1166,9 @@ class AIChat:
                         elif command == '/info':
                             self._display_info()
                             continue
+                        elif command == '/fav':
+                            self._display_fav()
+                            continue
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
@@ -1199,6 +1203,7 @@ class AIChat:
             "[bold cyan]Available Commands:[/bold cyan]\n"
             "  [bold yellow]/help[/bold yellow]    - Display this help message\n"
             "  [bold yellow]/info[/bold yellow]    - Display chat session information\n"
+            "  [bold yellow]/fav[/bold yellow]     - Add/remove current model to/from favorites\n"
             "  [bold yellow]/save[/bold yellow]    - Save chat history\n"
             "             Usage: /save [optional_name]\n"
             "  [bold yellow]/clear[/bold yellow]   - Clear screen and chat history\n"
@@ -1494,3 +1499,90 @@ class AIChat:
             completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
         
         return prompt_cost + completion_cost 
+
+    def _display_fav(self):
+        """Add or remove current model from favorites"""
+        try:
+            # Create favorites.json path
+            favorites_path = os.path.join(os.path.dirname(__file__), 'favorites.json')
+            
+            # Load existing favorites
+            if os.path.exists(favorites_path):
+                with open(favorites_path, 'r') as f:
+                    favorites = json.load(f)['favorites']
+            else:
+                favorites = []
+            
+            # Format display name
+            display_name = self.model_name
+            if self.provider == 'openrouter' and display_name.startswith(f"{self.model_id.split('/')[0].title()}: "):
+                # Name already has provider prefix, use it as is
+                display_name = self.model_name
+            elif self.provider == 'openrouter' and '/' in self.model_id:
+                # Add provider prefix if not present
+                company = self.model_id.split('/')[0].title()
+                display_name = f"{company}: {display_name}"
+            
+            # Check if model is already in favorites
+            model_id = self.model_id
+            is_favorite = any(f['id'] == model_id for f in favorites)
+            
+            if is_favorite:
+                # Remove from favorites
+                favorites = [f for f in favorites if f['id'] != model_id]
+                self.console.print(f"[yellow]Removed {display_name} from favorites[/yellow]")
+            else:
+                # For OpenRouter models, get description from API
+                if self.provider == 'openrouter':
+                    try:
+                        response = requests.get(
+                            f"https://openrouter.ai/api/v1/models",
+                            headers=get_openrouter_headers(self.api_key)
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            if 'data' in data:
+                                for model in data['data']:
+                                    if model['id'] == model_id:
+                                        description = model.get('description')
+                                        break
+                                else:
+                                    description = f"{display_name} ({self.provider})"
+                        else:
+                            description = f"{display_name} ({self.provider})"
+                    except:
+                        description = f"{display_name} ({self.provider})"
+                else:
+                    # For other providers, try to get description from models.json
+                    description = None
+                    models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+                    if os.path.exists(models_path):
+                        try:
+                            with open(models_path, 'r') as f:
+                                models = json.load(f)['models']
+                                for model in models:
+                                    if model['id'] == model_id:
+                                        description = model.get('description')
+                                        break
+                        except:
+                            pass
+                    if not description:
+                        description = f"{display_name} ({self.provider})"
+                
+                # Add to favorites
+                favorite = {
+                    'id': model_id,
+                    'name': display_name,
+                    'provider': self.provider,
+                    'description': description
+                }
+                favorites.append(favorite)
+                self.console.print(f"[green]Added {display_name} to favorites[/green]")
+            
+            # Save updated favorites
+            with open(favorites_path, 'w') as f:
+                json.dump({'favorites': favorites}, f, indent=4)
+            
+        except Exception as e:
+            self.logger.error(f"Error managing favorites: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error managing favorites: {e}[/bold red]")

@@ -76,20 +76,51 @@ class AIChatApp:
 
     def add_to_favorites(self, model_config):
         """Add a model to favorites"""
-        model_id = f"{model_config.get('provider', 'unknown')}:{model_config['id']}"
+        model_id = model_config['id']
+        provider = model_config.get('provider', 'unknown')
         
-        if not any(f['id'] == model_config['id'] for f in self.favorites):
+        # Get the base name without provider prefix
+        display_name = model_config['name']
+        if provider == 'openrouter' and display_name.startswith(f"{model_id.split('/')[0].title()}: "):
+            # Name already has provider prefix, use it as is
+            display_name = model_config['name']
+        elif provider == 'openrouter' and '/' in model_id:
+            # Add provider prefix if not present
+            company = model_id.split('/')[0].title()
+            display_name = f"{company}: {display_name}"
+        
+        if not any(f['id'] == model_id for f in self.favorites):
+            # For OpenRouter models, use the description from the API response
+            if provider == 'openrouter':
+                description = model_config.get('description', f"{display_name} ({provider})")
+            else:
+                # For other providers, try to get description from models.json
+                description = None
+                models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+                if os.path.exists(models_path):
+                    try:
+                        with open(models_path, 'r') as f:
+                            models = json.load(f)['models']
+                            for model in models:
+                                if model['id'] == model_id:
+                                    description = model.get('description')
+                                    break
+                    except:
+                        pass
+                if not description:
+                    description = f"{display_name} ({provider})"
+            
             favorite = {
-                'id': model_config['id'],
-                'name': model_config['name'],
-                'provider': model_config.get('provider', 'unknown'),
-                'description': model_config.get('description', 'No description')
+                'id': model_id,
+                'name': display_name,
+                'provider': provider,
+                'description': description
             }
             self.favorites.append(favorite)
             self.save_favorites()
-            self.console.print(f"[green]Added {model_config['name']} to favorites[/green]")
+            self.console.print(f"[green]Added {display_name} to favorites[/green]")
         else:
-            self.console.print(f"[yellow]{model_config['name']} is already in favorites[/yellow]")
+            self.console.print(f"[yellow]{display_name} is already in favorites[/yellow]")
 
     def remove_from_favorites(self, model_id):
         """Remove a model from favorites"""
@@ -104,8 +135,19 @@ class AIChatApp:
             self.favorites.sort(key=lambda x: (x['provider'].lower(), x['name'].lower()))
         self.save_favorites()
 
+    def reload_favorites(self):
+        """Reload favorites from file"""
+        if os.path.exists(self.favorites_path):
+            with open(self.favorites_path, 'r') as f:
+                self.favorites = json.load(f)['favorites']
+        else:
+            self.favorites = []
+
     def manage_favorites(self):
         """Display favorites management menu"""
+        # Reload favorites from file
+        self.reload_favorites()
+        
         if not self.favorites:
             self.console.print("[yellow]No favorite models yet[/yellow]")
             return
@@ -1097,6 +1139,9 @@ class AIChatApp:
         
         while True:
             try:
+                # Reload favorites
+                self.reload_favorites()
+                
                 # Check API availability first
                 openai_available = bool(os.getenv('OPENAI_API_KEY'))
                 openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
