@@ -451,13 +451,10 @@ class AIChat:
                         "model": self.model_id,
                         "messages": anthropic_messages,
                         "system": self.messages[0]['content'],
-                        "temperature": 0.7
+                        "temperature": 0.7,
+                        "max_tokens": self.max_tokens if self.max_tokens else 4096  # Always provide max_tokens
                     }
                     
-                    # Add max_tokens only if configured
-                    if self.max_tokens:
-                        request_data["max_tokens"] = self.max_tokens
-
                     response = self.client.messages.create(**request_data)
                     log_api_response("Anthropic", request_data, response)
                     ai_response = response.content[0].text
