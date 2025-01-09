@@ -613,6 +613,7 @@ class AIChatApp:
             settings = self._load_settings()
             agent_settings = settings.get('agent', {})
             agent_enabled = agent_settings.get('enabled', False)
+            stores = self.chroma_manager.list_stores()  # Get list of stores
             
             current_store = "None"
             if self.chroma_manager and self.chroma_manager.store_name:
@@ -637,8 +638,8 @@ class AIChatApp:
 
                 if self.chroma_manager and self.chroma_manager.store_name:
                     choices.extend([
+                        ("Manage Store", "manage_store"),
                         ("Test Search", "test"),
-                        ("Refresh Store", "refresh"),
                         ("Select Embedding Model", "model"),
                     ])
 
@@ -675,6 +676,9 @@ class AIChatApp:
                     self.console.print("[yellow]Please enable the agent first[/yellow]")
                     continue
                 self.chroma_manager.test_embeddings()
+
+            elif answer['action'] == "manage_store":
+                self.manage_store()
 
             elif answer['action'] == "chromadb_settings":
                 if not self.chroma_manager:
@@ -817,51 +821,6 @@ class AIChatApp:
                     settings['chromadb'] = chromadb_settings
                     self._save_settings(settings)
 
-            elif answer['action'] == "refresh":
-                if not self.chroma_manager or not self.chroma_manager.store_name:
-                    self.console.print("[yellow]Please select a store first[/yellow]")
-                    continue
-
-                refresh_choices = [
-                    ("Refresh Using Last Directory", "last"),
-                    ("Refresh Different Directory", "directory"),
-                    ("Refresh Specific Files", "files"),
-                    ("Back", None)
-                ]
-
-                refresh_question = [
-                    inquirer.List('refresh_type',
-                        message="Select Refresh Type",
-                        choices=refresh_choices,
-                        carousel=True
-                    ),
-                ]
-
-                refresh_answer = inquirer.prompt(refresh_question)
-                if refresh_answer and refresh_answer['refresh_type']:
-                    if refresh_answer['refresh_type'] == "last":
-                        self.chroma_manager.refresh_store()
-                    elif refresh_answer['refresh_type'] == "directory":
-                        dir_question = [
-                            inquirer.Text('directory',
-                                message="Enter directory path to refresh",
-                                default="."
-                            )
-                        ]
-                        dir_answer = inquirer.prompt(dir_question)
-                        if dir_answer:
-                            self.chroma_manager.refresh_store(directory_path=dir_answer['directory'])
-                    else:  # files
-                        files_question = [
-                            inquirer.Text('files',
-                                message="Enter file paths (comma-separated)",
-                            )
-                        ]
-                        files_answer = inquirer.prompt(files_question)
-                        if files_answer:
-                            files = [f.strip() for f in files_answer['files'].split(',')]
-                            self.chroma_manager.refresh_store(files=files)
-
             elif answer['action'] == "create":
                 name_question = [
                     inquirer.Text('name',
@@ -874,22 +833,25 @@ class AIChatApp:
                 if name_answer:
                     if self.chroma_manager.create_store(name_answer['name']):
                         if inquirer.confirm("Would you like to process a directory now?", default=True):
-                            dir_question = [
+                            dir_questions = [
                                 inquirer.Text('directory',
                                     message="Enter directory path to process",
-                                    default="."
-                                )
+                                    validate=lambda _, x: os.path.exists(x.strip('"\''))
+                                ),
+                                inquirer.Confirm('include_subdirs',
+                                    message="Include subdirectories?",
+                                    default=True
+                                ),
                             ]
-                            dir_answer = inquirer.prompt(dir_question)
+                            dir_answer = inquirer.prompt(dir_questions)
                             if dir_answer:
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+                                directory_path = dir_answer['directory'].strip('"\'')
+                                include_subdirs = dir_answer['include_subdirs']
+                                self.chroma_manager.process_directory(directory_path, include_subdirs=include_subdirs)
+                    else:
+                        self.console.print("[red]Failed to create store[/red]")
 
-            elif answer['action'] == "select":
-                stores = self.chroma_manager.list_stores()
-                if not stores:
-                    self.console.print("[yellow]No stores available[/yellow]")
-                    continue
-
+            elif answer['action'] == "select" and stores:
                 store_choices = [
                     ("None (Disable Store)", "none"),  # Add None option at the top
                 ]
@@ -913,12 +875,7 @@ class AIChatApp:
                             if inquirer.confirm("Would you like to refresh the store to check for new files?", default=False):
                                 self.chroma_manager.refresh_store()
 
-            elif answer['action'] == "delete":
-                stores = self.chroma_manager.list_stores()
-                if not stores:
-                    self.console.print("[yellow]No stores available[/yellow]")
-                    continue
-
+            elif answer['action'] == "delete" and stores:
                 store_choices = [(store, store) for store in stores]
                 store_choices.append(("Back", None))
 
@@ -939,6 +896,8 @@ class AIChatApp:
                     if confirm:
                         if self.chroma_manager.delete_store(store_answer['store']):
                             self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
+                        else:
+                            self.console.print("[red]Failed to delete store[/red]")
 
             elif answer['action'] == "test":
                 query = inquirer.text(message="Enter a test query")
@@ -959,6 +918,213 @@ class AIChatApp:
 
             elif answer['action'] == "model":
                 self.chroma_manager.select_embedding_model()
+
+    def manage_store(self):
+        """Manage current store contents and operations"""
+        if not self.chroma_manager or not self.chroma_manager.store_name:
+            self.console.print("[yellow]Please select a store first[/yellow]")
+            return
+
+        while True:
+            # Get current store info
+            store_name = self.chroma_manager.store_name
+            doc_count = self.chroma_manager.vectorstore._collection.count() if self.chroma_manager.vectorstore else 0
+
+            choices = [
+                ("═══ Store Information ═══", None),
+                (f"Current Store: {store_name}", None),
+                (f"Document Count: {doc_count}", None),
+                ("═══ Content Management ═══", None),
+                ("View Store Contents", "view"),
+                ("Add Files", "add_files"),
+                ("Add Directory", "add_directory"),
+                ("Refresh Store", "refresh"),
+                ("═══ Document Management ═══", None),
+                ("List All Documents", "list_docs"),
+                ("Delete Documents", "delete_docs"),
+                ("Update Document", "update_doc"),
+                ("Clear All Documents", "clear_store"),
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage Store",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "view":
+                # Show store contents with search
+                query = inquirer.text(message="Enter search query (or press Enter to see all)")
+                if query is not None:  # Allow empty query
+                    self.console.print("\n[cyan]Searching store contents...[/cyan]")
+                    results = self.chroma_manager.search_context(query if query else "", k=50)
+                    if results:
+                        self.console.print("\n[green]Store contents:[/green]")
+                        for i, result in enumerate(results, 1):
+                            self.console.print(Panel(
+                                result,
+                                title=f"[bold cyan]Result {i}[/bold cyan]",
+                                border_style="cyan"
+                            ))
+                    else:
+                        self.console.print("[yellow]No matching documents found[/yellow]")
+                    self.console.input("\nPress Enter to continue...")
+
+            elif answer['action'] == "list_docs":
+                documents = self.chroma_manager.get_all_documents()
+                if documents:
+                    self.console.print("\n[green]All Documents in Store:[/green]")
+                    for doc in documents:
+                        self.console.print(Panel(
+                            f"[bold white]ID:[/bold white] {doc['id']}\n\n"
+                            f"[bold white]Content:[/bold white]\n{doc['content']}\n\n"
+                            f"[bold white]Metadata:[/bold white]\n{json.dumps(doc['metadata'], indent=2)}",
+                            title=f"[bold cyan]Document[/bold cyan]",
+                            border_style="cyan"
+                        ))
+                    self.console.input("\nPress Enter to continue...")
+                else:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+
+            elif answer['action'] == "delete_docs":
+                documents = self.chroma_manager.get_all_documents()
+                if not documents:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+                    continue
+
+                # Create choices for documents
+                doc_choices = []
+                for doc in documents:
+                    # Get first line or truncate content for display
+                    content_preview = doc['content'].split('\n')[0][:100] + "..."
+                    doc_choices.append((
+                        f"ID: {doc['id']} - {content_preview}",
+                        doc['id']
+                    ))
+                doc_choices.append(("Back", None))
+
+                # Allow multiple selection
+                doc_question = [
+                    inquirer.Checkbox('docs',
+                        message="Select documents to delete (space to select, enter to confirm)",
+                        choices=doc_choices[:-1]  # Exclude "Back" option
+                    )
+                ]
+
+                doc_answer = inquirer.prompt(doc_question)
+                if doc_answer and doc_answer['docs']:
+                    if inquirer.confirm("Are you sure you want to delete these documents?", default=False):
+                        self.chroma_manager.delete_documents(doc_answer['docs'])
+
+            elif answer['action'] == "update_doc":
+                documents = self.chroma_manager.get_all_documents()
+                if not documents:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+                    continue
+
+                # Create choices for documents
+                doc_choices = []
+                for doc in documents:
+                    # Get first line or truncate content for display
+                    content_preview = doc['content'].split('\n')[0][:100] + "..."
+                    doc_choices.append((
+                        f"ID: {doc['id']} - {content_preview}",
+                        doc
+                    ))
+                doc_choices.append(("Back", None))
+
+                # Select document to update
+                doc_question = [
+                    inquirer.List('doc',
+                        message="Select document to update",
+                        choices=doc_choices,
+                        carousel=True
+                    )
+                ]
+
+                doc_answer = inquirer.prompt(doc_question)
+                if doc_answer and doc_answer['doc']:
+                    doc = doc_answer['doc']
+                    self.console.print(Panel(
+                        doc['content'],
+                        title=f"[bold cyan]Current Content - ID: {doc['id']}[/bold cyan]",
+                        border_style="cyan"
+                    ))
+                    
+                    self.console.print(
+                        "\n[bold cyan]Enter new content below:[/bold cyan]\n"
+                        "• You can paste multiple lines of text\n"
+                        "• Press [bold]Enter[/bold] twice to start a new line\n"
+                        "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                        "• Type [bold]CANCEL[/bold] on a new line to cancel"
+                    )
+                    
+                    content_lines = []
+                    try:
+                        while True:
+                            line = input()
+                            if line.strip().upper() == 'END':
+                                break
+                            if line.strip().upper() == 'CANCEL':
+                                content_lines = []
+                                break
+                            content_lines.append(line)
+                    except KeyboardInterrupt:
+                        self.console.print("\n[yellow]Update cancelled[/yellow]")
+                        continue
+
+                    if content_lines:
+                        new_content = '\n'.join(content_lines)
+                        if inquirer.confirm("Update this document?", default=True):
+                            self.chroma_manager.update_document(doc['id'], new_content)
+
+            elif answer['action'] == "clear_store":
+                if inquirer.confirm(
+                    "Are you sure you want to remove ALL documents from the store?",
+                    default=False
+                ):
+                    self.chroma_manager.clear_store()
+
+            elif answer['action'] == "add_files":
+                files_question = [
+                    inquirer.Text('files',
+                        message="Enter file paths (comma-separated)",
+                    )
+                ]
+                files_answer = inquirer.prompt(files_question)
+                if files_answer:
+                    files = [f.strip() for f in files_answer['files'].split(',')]
+                    self.chroma_manager.refresh_store(files=files)
+
+            elif answer['action'] == "add_directory":
+                dir_question = [
+                    inquirer.Text('directory',
+                        message="Enter directory path to process",
+                        default="."
+                    ),
+                    inquirer.Confirm('include_subdirs',
+                        message="Include subdirectories?",
+                        default=True
+                    )
+                ]
+                dir_answer = inquirer.prompt(dir_question)
+                if dir_answer:
+                    self.chroma_manager.process_directory(
+                        dir_answer['directory'],
+                        include_subdirs=dir_answer['include_subdirs']
+                    )
+
+            elif answer['action'] == "refresh":
+                if inquirer.confirm("Are you sure you want to refresh the store? This will reprocess all files.", default=True):
+                    self.chroma_manager.refresh_store()
 
     def manage_model_contexts(self):
         """Display and manage context window settings for models"""
@@ -1099,15 +1265,21 @@ class AIChatApp:
                     if self.chroma_manager.create_store(name_answer['name']):
                         # Ask if user wants to process a directory
                         if inquirer.confirm("Would you like to process a directory now?", default=True):
-                            dir_question = [
+                            dir_questions = [
                                 inquirer.Text('directory',
                                     message="Enter directory path to process",
-                                    default="."
-                                )
+                                    validate=lambda _, x: os.path.exists(x.strip('"\''))
+                                ),
+                                inquirer.Confirm('include_subdirs',
+                                    message="Include subdirectories?",
+                                    default=True
+                                ),
                             ]
-                            dir_answer = inquirer.prompt(dir_question)
+                            dir_answer = inquirer.prompt(dir_questions)
                             if dir_answer:
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+                                directory_path = dir_answer['directory'].strip('"\'')
+                                include_subdirs = dir_answer['include_subdirs']
+                                self.chroma_manager.process_directory(directory_path, include_subdirs=include_subdirs)
                     else:
                         self.console.print("[red]Failed to create store[/red]")
 
