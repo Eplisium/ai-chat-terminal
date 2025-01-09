@@ -1,4 +1,5 @@
 from imports import *
+import threading
 from utils import log_api_response, encode_image_to_base64, get_image_mime_type, read_document_content, sanitize_path
 
 def get_openrouter_headers(api_key):
@@ -415,8 +416,30 @@ class AIChat:
             if self.stats_manager:
                 self.stats_manager.record_chat(self.model_id, "sent")
             
-            thinking_message = self.console.status(f"[bold yellow]{self.model_name} is thinking...[/bold yellow]")
+            start_time = time.time()
+            thinking_message = self.console.status("")
             thinking_message.start()
+            
+            # Use a threading Event to control the timer
+            stop_timer = threading.Event()
+            
+            def update_thinking_message():
+                while not stop_timer.is_set():
+                    elapsed = time.time() - start_time
+                    minutes = int(elapsed // 60)
+                    seconds = elapsed % 60
+                    time_display = f"{seconds:.2f} secs"
+                    if minutes > 0:
+                        time_display = f"{minutes} min {seconds:.2f} secs"
+                    thinking_message.update(
+                        f"[bold yellow]{self.model_name} is thinking... ({time_display})[/bold yellow]"
+                    )
+                    time.sleep(0.1)  # Update every 100ms
+            
+            # Start the timer in a separate thread
+            timer_thread = threading.Thread(target=update_thinking_message)
+            timer_thread.daemon = True
+            timer_thread.start()
             
             try:
                 if self.provider == 'anthropic':
@@ -701,6 +724,13 @@ class AIChat:
                 log_api_response(self.provider, request_data, None, error=e)
                 raise
             finally:
+                # Calculate total response time
+                response_time = time.time() - start_time
+                # Store response time for display
+                self.last_response_time = response_time
+                # Stop the timer thread before stopping the thinking message
+                stop_timer.set()
+                timer_thread.join(timeout=1.0)  # Wait for the thread to finish
                 thinking_message.stop()
             
             self._display_response(ai_response)
@@ -771,17 +801,27 @@ class AIChat:
         # Get colors from settings
         colors = self._get_colors()
         
-        # Create the footer with cost if it's an OpenRouter response
-        footer = None
+        # Create the footer with cost and response time
+        footer_parts = []
+        
+        # Add response time
+        if hasattr(self, 'last_response_time'):
+            minutes = int(self.last_response_time // 60)
+            seconds = self.last_response_time % 60
+            time_display = f"{seconds:.2f} secs"
+            if minutes > 0:
+                time_display = f"{minutes} min {seconds:.2f} secs"
+            response_time = f"Response Time: {time_display}"
+            footer_parts.append(response_time)
+        
+        # Add cost information
         if hasattr(self, 'last_total_cost') and hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
-            cost_parts = []
-            
             if self.last_total_cost > 0:
-                cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
+                footer_parts.append(f"Cost: ${self.last_total_cost:.6f}")
             elif self.last_total_cost == 0:
-                cost_parts.append("Cost: Free")
+                footer_parts.append("Cost: Free")
             else:
-                cost_parts.append("Cost: Not Found")
+                footer_parts.append("Cost: Not Found")
             
             tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
             if self.provider == 'openrouter' and hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
@@ -789,9 +829,9 @@ class AIChat:
                     self.last_native_tokens_completion != self.last_tokens_completion) and \
                     self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
                     tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
-            cost_parts.append(tokens)
-            
-            footer = f"[bold {colors['cost']}]{' | '.join(cost_parts)}[/]"
+            footer_parts.append(tokens)
+        
+        footer = f"[bold {colors['cost']}]{' | '.join(footer_parts)}[/]"
         
         self.console.print(
             Panel(
