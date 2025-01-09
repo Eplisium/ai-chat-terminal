@@ -1005,9 +1005,14 @@ class AIChat:
             # Get colors from settings
             colors = self._get_colors()
             
+            # Get agent status if enabled
+            agent_status = ""
+            if self.chroma_manager and self.chroma_manager.vectorstore and self.chroma_manager.store_name:
+                agent_status = f" [bold cyan]〈Agent Store: {self.chroma_manager.store_name}〉[/]"
+            
             welcome_text = (
                 f"{logo}\n"
-                f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]\n\n"
+                f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]{agent_status}\n\n"
                 "📝 Type your message and press Enter to send\n"
                 "🔗 Reference files and directories:\n"
                 "   [[ file:example.py]]          - View single file contents\n"
