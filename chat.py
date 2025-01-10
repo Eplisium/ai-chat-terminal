@@ -101,11 +101,19 @@ class AIChat:
         self.last_save_path = None  # Track last save location
         self.last_save_name = None  # Track last used custom name
         
-        # Get streaming setting
+        # Get streaming and tools settings
         self.streaming_enabled = False
+        self.tools_enabled = False
+        self.available_tools = {}
         if self.settings_manager:
             settings = self.settings_manager._load_settings()
             self.streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+            self.tools_enabled = settings.get('tools', {}).get('enabled', False)
+            if self.tools_enabled:
+                self.available_tools = {
+                    name: info for name, info in settings.get('tools', {}).get('available_tools', {}).items()
+                    if info.get('enabled', True)
+                }
         
         # Handle system instruction name and content
         if isinstance(system_instruction, dict):
@@ -268,148 +276,11 @@ class AIChat:
 
             # Add user message
             current_message = {"role": "user", "content": user_input}
-            
-            # Process code blocks and file/directory references
-            if "```" in user_input or "[[" in user_input:
-                content = []
-                remaining_text = user_input
-                
-                # Extract code blocks
-                while "```" in remaining_text:
-                    start = remaining_text.find("```")
-                    if start == -1:
-                        break
-                    
-                    # Add text before code block
-                    if start > 0:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[:start].strip()
-                        })
-                    
-                    # Find the end of the code block
-                    end = remaining_text.find("```", start + 3)
-                    if end == -1:
-                        # No closing backticks, treat rest as text
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:].strip()
-                        })
-                        break
-                    
-                    # Extract language (if specified) and code
-                    code_block = remaining_text[start+3:end]
-                    language = ""
-                    if "\n" in code_block:
-                        first_line = code_block[:code_block.find("\n")].strip()
-                        if first_line and not first_line.startswith(" "):
-                            language = first_line
-                            code_block = code_block[code_block.find("\n")+1:]
-                    
-                    content.append({
-                        "type": "code",
-                        "language": language,
-                        "code": code_block.strip()
-                    })
-                    
-                    remaining_text = remaining_text[end+3:]
-                
-                # Process remaining text for file/directory references
-                while "[[" in remaining_text:
-                    start = remaining_text.find("[[")
-                    if start == -1:
-                        break
-                    
-                    # Add text before reference
-                    if start > 0:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[:start].strip()
-                        })
-                    
-                    # Find the end of the reference
-                    end = remaining_text.find("]]", start)
-                    if end == -1:
-                        # No closing brackets, treat rest as text
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:].strip()
-                        })
-                        break
-                    
-                    # Extract reference
-                    ref = remaining_text[start+2:end].strip()
-                    
-                    # Check for file/dir prefix
-                    ref_type = None
-                    ref_path = ref
-                    
-                    if ref.startswith('file:'):
-                        ref_type = 'file'
-                        ref_path = ref[5:].strip()
-                    elif ref.startswith('dir:'):
-                        ref_type = 'dir'
-                        ref_path = ref[4:].strip()
-                    elif ref.startswith('img:'):
-                        ref_type = 'image'
-                        ref_path = ref[4:].strip()
-                        # Remove quotes if present
-                        if ref_path.startswith('"') and ref_path.endswith('"'):
-                            ref_path = ref_path[1:-1]
-                    
-                    if ref_type:
-                        # Process file and directory references
-                        if ref_type == "file":
-                            success, result = self._process_file_reference(f"[[file:{ref_path}]]")
-                            content.append({
-                                "type": "text",
-                                "text": result
-                            })
-                        elif ref_type == "dir":
-                            success, result = self._process_directory_reference(f"[[dir:{ref_path}]]")
-                            content.append({
-                                "type": "text",
-                                "text": result
-                            })
-                        elif ref_type == "image":
-                            success, result = encode_image_to_base64(ref_path)
-                            if success:
-                                mime_type = get_image_mime_type(ref_path)
-                                content.append({
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{mime_type};base64,{result}"
-                                    }
-                                })
-                            else:
-                                content.append({
-                                    "type": "text",
-                                    "text": f"Error processing image: {result}"
-                                })
-                        else:
-                            content.append({
-                                "type": "reference",
-                                "ref_type": ref_type,
-                                "path": ref_path
-                            })
-                    else:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:end+2].strip()
-                        })
-                    
-                    remaining_text = remaining_text[end+2:]
-                
-                if remaining_text.strip():
-                    content.append({
-                        "type": "text",
-                        "text": remaining_text.strip()
-                    })
-                
-                current_message["content"] = content
-
             messages.append(current_message)
             self.messages.append(current_message)
+            
+            # Initialize tool results
+            self.last_tool_results = []
             
             # Check if the message is a command
             if isinstance(user_input, str):
@@ -569,6 +440,104 @@ class AIChat:
                         "stream": self.streaming_enabled
                     }
 
+                    # Add tools if enabled and available
+                    if self.tools_enabled and self.available_tools:
+                        tools = []
+                        if 'search' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "description": "Search the web for information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "description": "The search query"
+                                            }
+                                        },
+                                        "required": ["query"]
+                                    }
+                                }
+                            })
+                        if 'calculate' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "calculate",
+                                    "description": "Perform mathematical calculations",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "expression": {
+                                                "type": "string",
+                                                "description": "The mathematical expression to evaluate"
+                                            }
+                                        },
+                                        "required": ["expression"]
+                                    }
+                                }
+                            })
+                        if 'time' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "get_time",
+                                    "description": "Get current time and date information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "timezone": {
+                                                "type": "string",
+                                                "description": "Optional timezone (e.g., 'UTC', 'America/New_York')"
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        if 'weather' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "description": "Get weather information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "location": {
+                                                "type": "string",
+                                                "description": "Location to get weather for"
+                                            }
+                                        },
+                                        "required": ["location"]
+                                    }
+                                }
+                            })
+                        if 'system' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "system_info",
+                                    "description": "Get system information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "info_type": {
+                                                "type": "string",
+                                                "description": "Type of system information to retrieve (e.g., 'os', 'cpu', 'memory')",
+                                                "enum": ["os", "cpu", "memory", "disk"]
+                                            }
+                                        },
+                                        "required": ["info_type"]
+                                    }
+                                }
+                            })
+                        
+                        if tools:
+                            request_data["tools"] = tools
+                            request_data["tool_choice"] = "auto"
+
                     data = None  # Initialize data variable
                     if self.streaming_enabled:
                         response = requests.post(
@@ -589,8 +558,43 @@ class AIChat:
                                         chunk = json.loads(line[6:])
                                         if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
                                             partial_response += chunk['choices'][0]['delta']['content']
-                                        # Store the last chunk as data for token counting
-                                        data = chunk
+                                        elif chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('tool_calls'):
+                                            # Handle tool calls in streaming mode
+                                            tool_call = chunk['choices'][0]['delta']['tool_calls'][0]
+                                            if 'function' in tool_call:
+                                                # Add the assistant's tool call message
+                                                assistant_message = {
+                                                    "role": "assistant",
+                                                    "content": None,
+                                                    "tool_calls": [tool_call]
+                                                }
+                                                messages.append(assistant_message)
+                                                
+                                                # Execute tool call and get result
+                                                result = self._execute_tool_call(tool_call)
+                                                
+                                                # Add tool result as a message
+                                                messages.append({
+                                                    "role": "tool",
+                                                    "name": tool_call['function']['name'],
+                                                    "tool_call_id": tool_call.get('id', ''),
+                                                    "content": result
+                                                })
+                                                
+                                                # Make a new request to get the AI's natural response
+                                                request_data["messages"] = messages
+                                                request_data["stream"] = False
+                                                request_data["tools"] = None  # Remove tools to avoid recursive tool calls
+                                                request_data["tool_choice"] = None
+                                                
+                                                response = requests.post(
+                                                    f"{self.api_base}/chat/completions",
+                                                    headers=get_openrouter_headers(self.api_key),
+                                                    json=request_data
+                                                )
+                                                response.raise_for_status()
+                                                data = response.json()
+                                                partial_response = data['choices'][0]['message']['content'].strip()
                                     except json.JSONDecodeError:
                                         continue
                     else:
@@ -603,7 +607,51 @@ class AIChat:
                         response.raise_for_status()
                         data = response.json()
                         log_api_response("OpenRouter", request_data, data)
-                        partial_response = data['choices'][0]['message']['content'].strip()
+                        
+                        # Handle tool calls in non-streaming mode
+                        if data['choices'][0].get('message', {}).get('tool_calls'):
+                            tool_results = []
+                            tool_messages = []
+                            
+                            # First, add the assistant's tool call message
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": data['choices'][0]['message']['tool_calls']
+                            }
+                            messages.append(assistant_message)
+                            
+                            # Execute tool calls and collect results
+                            for tool_call in data['choices'][0]['message']['tool_calls']:
+                                result = self._execute_tool_call(tool_call)
+                                tool_results.append(result)
+                                
+                                # Add tool result as a message
+                                tool_messages.append({
+                                    "role": "tool",
+                                    "name": tool_call['function']['name'],
+                                    "tool_call_id": tool_call.get('id', ''),
+                                    "content": result
+                                })
+                            
+                            # Add all tool results to the conversation
+                            messages.extend(tool_messages)
+                            
+                            # Make a second request to get the AI's natural response
+                            request_data["messages"] = messages
+                            request_data["tools"] = None  # Remove tools to avoid recursive tool calls
+                            request_data["tool_choice"] = None
+                            
+                            response = requests.post(
+                                f"{self.api_base}/chat/completions",
+                                headers=get_openrouter_headers(self.api_key),
+                                json=request_data
+                            )
+                            response.raise_for_status()
+                            data = response.json()
+                            partial_response = data['choices'][0]['message']['content'].strip()
+                        else:
+                            partial_response = data['choices'][0]['message']['content'].strip()
 
                     # Get token usage with a separate request
                     if data and data.get('id'):
@@ -777,35 +825,34 @@ class AIChat:
         if not response_text:
             return
 
-        sections = []
-        current_section = []
-        lines = response_text.split('\n')
-        
-        for line in lines:
-            if (not line.strip() and current_section) or \
-               (line.strip().startswith(('•', '-', '*', '1.', '#')) and current_section):
-                if current_section:
-                    sections.append('\n'.join(current_section))
-                    current_section = []
-            if line.strip():
-                current_section.append(line)
-        
-        if current_section:
-            sections.append('\n'.join(current_section))
-        
-        if not sections:
-            sections = [response_text]
-        
-        formatted_text = []
-        for i, section in enumerate(sections):
-            if i > 0:
-                formatted_text.append("")
-            formatted_text.append(section)
-        
-        final_text = '\n'.join(formatted_text)
-
         # Get colors from settings
         colors = self._get_colors()
+        
+        # Format tool results if present
+        if hasattr(self, 'last_tool_results') and self.last_tool_results:
+            formatted_text = response_text
+        else:
+            # Format regular response
+            sections = []
+            current_section = []
+            lines = response_text.split('\n')
+            
+            for line in lines:
+                if (not line.strip() and current_section) or \
+                   (line.strip().startswith(('•', '-', '*', '1.', '#')) and current_section):
+                    if current_section:
+                        sections.append('\n'.join(current_section))
+                        current_section = []
+                if line.strip():
+                    current_section.append(line)
+            
+            if current_section:
+                sections.append('\n'.join(current_section))
+            
+            if not sections:
+                sections = [response_text]
+            
+            formatted_text = '\n\n'.join(sections)
         
         # Create the footer with cost and response time
         footer_parts = []
@@ -841,7 +888,7 @@ class AIChat:
         
         self.console.print(
             Panel(
-                Markdown(final_text),
+                Markdown(formatted_text),
                 title=f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]",
                 subtitle=footer,
                 border_style="bright_blue",
@@ -1646,3 +1693,96 @@ class AIChat:
         except Exception as e:
             self.logger.error(f"Error managing favorites: {e}", exc_info=True)
             self.console.print(f"[bold red]Error managing favorites: {e}[/bold red]")
+
+    def _execute_tool_call(self, tool_call):
+        """Execute a tool call and return the result"""
+        try:
+            function_name = tool_call['function']['name']
+            arguments = json.loads(tool_call['function']['arguments'])
+
+            if function_name == 'search':
+                # Implement web search functionality
+                query = arguments['query']
+                # This is a placeholder - you would implement actual web search here
+                return f"Based on my search, here are the results for '{query}'\n(Web search functionality not implemented yet)"
+
+            elif function_name == 'calculate':
+                # Implement safe mathematical calculation
+                expression = arguments['expression']
+                try:
+                    # Use ast.literal_eval for safe evaluation
+                    import ast
+                    import operator
+                    
+                    def safe_eval(node):
+                        operators = {
+                            ast.Add: operator.add,
+                            ast.Sub: operator.sub,
+                            ast.Mult: operator.mul,
+                            ast.Div: operator.truediv,
+                            ast.Pow: operator.pow,
+                            ast.USub: operator.neg,
+                        }
+                        
+                        if isinstance(node, ast.Num):
+                            return node.n
+                        elif isinstance(node, ast.BinOp):
+                            left = safe_eval(node.left)
+                            right = safe_eval(node.right)
+                            return operators[type(node.op)](left, right)
+                        elif isinstance(node, ast.UnaryOp):
+                            operand = safe_eval(node.operand)
+                            return operators[type(node.op)](operand)
+                        else:
+                            raise ValueError(f"Unsupported operation: {type(node)}")
+                    
+                    tree = ast.parse(expression, mode='eval')
+                    result = safe_eval(tree.body)
+                    return f"The result of the calculation is: {result}"
+                except Exception as e:
+                    return f"I encountered an error while calculating: {str(e)}"
+
+            elif function_name == 'get_time':
+                # Implement time/date functionality with New York as default
+                from datetime import datetime
+                import pytz
+                
+                timezone = arguments.get('timezone', 'America/New_York')  # Default to New York
+                try:
+                    tz = pytz.timezone(timezone)
+                    current_time = datetime.now(tz)
+                    return f"The current time is {current_time.strftime('%I:%M %p')} on {current_time.strftime('%A, %B %d, %Y')} ({timezone})"
+                except Exception as e:
+                    return f"I encountered an error while getting the time: {str(e)}"
+
+            elif function_name == 'get_weather':
+                # Implement weather functionality
+                location = arguments['location']
+                # This is a placeholder - you would implement actual weather API call here
+                return f"Here's the current weather for {location}\n(Weather functionality not implemented yet)"
+
+            elif function_name == 'system_info':
+                # Implement system information functionality
+                import platform
+                import psutil
+                
+                info_type = arguments['info_type']
+                if info_type == 'os':
+                    return f"Your system is running {platform.system()} {platform.version()}"
+                elif info_type == 'cpu':
+                    return f"Your CPU is currently at {psutil.cpu_percent()}% usage"
+                elif info_type == 'memory':
+                    memory = psutil.virtual_memory()
+                    return f"Your memory usage is at {memory.percent}% (Using {memory.used/1024/1024/1024:.1f}GB out of {memory.total/1024/1024/1024:.1f}GB)"
+                elif info_type == 'disk':
+                    disk = psutil.disk_usage('/')
+                    return f"Your disk usage is at {disk.percent}% (Using {disk.used/1024/1024/1024:.1f}GB out of {disk.total/1024/1024/1024:.1f}GB)"
+                else:
+                    return f"I don't have information about {info_type}"
+
+            else:
+                return f"I don't know how to handle the tool: {function_name}"
+
+        except Exception as e:
+            self.logger.error(f"Error executing tool call: {e}", exc_info=True)
+            return f"I encountered an error while using the tool: {str(e)}"

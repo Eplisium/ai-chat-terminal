@@ -548,6 +548,7 @@ class AIChatApp:
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
             streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+            tools_enabled = settings.get('tools', {}).get('enabled', False)
             agent_active = (
                 agent_enabled and 
                 self.chroma_manager and 
@@ -566,6 +567,9 @@ class AIChatApp:
             # Get streaming status
             streaming_status = "🟢 Enabled" if streaming_enabled else "⭕ Disabled"
 
+            # Get tools status
+            tools_status = "🟢 Enabled" if tools_enabled else "⭕ Disabled"
+
             # Get current instruction name
             current_instruction = self.instructions_manager.get_current_name()
 
@@ -573,6 +577,7 @@ class AIChatApp:
                 ("═══ AI Settings ═══", None),
                 (f"🤖 Agent           〈{agent_status}〉", "agent"),
                 (f"🤖 Streaming Mode   〈{streaming_status}〉", "streaming"),
+                (f"🤖️ AI Tools         〈{tools_status}〉", "tools"),
                 (f"🤖 System Instructions 〈{current_instruction}〉", "instructions"),
                 ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
@@ -602,10 +607,71 @@ class AIChatApp:
                 new_status = "enabled" if not streaming_enabled else "disabled"
                 icon = "🟢" if not streaming_enabled else "⭕"
                 self.console.print(f"{icon} Streaming mode {new_status}")
+            elif answer['setting'] == "tools":
+                self.manage_tools_settings()
             elif answer['setting'] == "instructions":
                 self.manage_instructions()
             elif answer['setting'] == "contexts":
                 self.manage_model_contexts()
+
+    def manage_tools_settings(self):
+        """Manage AI tools settings"""
+        while True:
+            settings = self._load_settings()
+            tools_settings = settings.get('tools', {})
+            tools_enabled = tools_settings.get('enabled', False)
+            available_tools = tools_settings.get('available_tools', {})
+
+            choices = [
+                ("═══ AI Tools Settings ═══", None),
+                (f"Tools Status: {'🟢 Enabled' if tools_enabled else '⭕ Disabled'}", None),
+                ("Toggle Tools", "toggle"),
+                ("═══ Available Tools ═══", None)
+            ]
+
+            # Add available tools with their status
+            for tool_name, tool_info in available_tools.items():
+                status = "✓" if tool_info.get('enabled', True) else "✗"
+                choices.append((
+                    f"{tool_name.title()}: {status} - {tool_info.get('description', 'No description')}",
+                    f"toggle_{tool_name}"
+                ))
+
+            choices.extend([
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ])
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage AI Tools",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "toggle":
+                # Toggle overall tools feature
+                tools_settings['enabled'] = not tools_enabled
+                settings['tools'] = tools_settings
+                self._save_settings(settings)
+                new_status = "enabled" if not tools_enabled else "disabled"
+                icon = "🟢" if not tools_enabled else "⭕"
+                self.console.print(f"{icon} AI tools {new_status}")
+            elif answer['action'].startswith("toggle_"):
+                # Toggle individual tool
+                tool_name = answer['action'][7:]  # Remove "toggle_" prefix
+                if tool_name in available_tools:
+                    available_tools[tool_name]['enabled'] = not available_tools[tool_name].get('enabled', True)
+                    settings['tools']['available_tools'] = available_tools
+                    self._save_settings(settings)
+                    new_status = "enabled" if available_tools[tool_name]['enabled'] else "disabled"
+                    icon = "✓" if available_tools[tool_name]['enabled'] else "✗"
+                    self.console.print(f"{icon} {tool_name.title()} tool {new_status}")
 
     def manage_agent_settings(self, agent_status):
         """Manage Agent settings"""
@@ -1635,6 +1701,34 @@ class AIChatApp:
                         settings['streaming'] = {
                             'enabled': False
                         }
+                    
+                    # Ensure tools settings exist with defaults
+                    if 'tools' not in settings:
+                        settings['tools'] = {
+                            'enabled': False,
+                            'available_tools': {
+                                'search': {
+                                    'enabled': True,
+                                    'description': 'Search the web for information'
+                                },
+                                'calculate': {
+                                    'enabled': True,
+                                    'description': 'Perform mathematical calculations'
+                                },
+                                'time': {
+                                    'enabled': True,
+                                    'description': 'Get current time and date information'
+                                },
+                                'weather': {
+                                    'enabled': True,
+                                    'description': 'Get weather information'
+                                },
+                                'system': {
+                                    'enabled': True,
+                                    'description': 'Access system information and perform OS operations'
+                                }
+                            }
+                        }
                         
                     self._save_settings(settings)
                     return settings
@@ -1644,13 +1738,39 @@ class AIChatApp:
                 },
                 'streaming': {
                     'enabled': False
+                },
+                'tools': {
+                    'enabled': False,
+                    'available_tools': {
+                        'search': {
+                            'enabled': True,
+                            'description': 'Search the web for information'
+                        },
+                        'calculate': {
+                            'enabled': True,
+                            'description': 'Perform mathematical calculations'
+                        },
+                        'time': {
+                            'enabled': True,
+                            'description': 'Get current time and date information'
+                        },
+                        'weather': {
+                            'enabled': True,
+                            'description': 'Get weather information'
+                        },
+                        'system': {
+                            'enabled': True,
+                            'description': 'Access system information and perform OS operations'
+                        }
+                    }
                 }
             }
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
             return {
                 'agent': {'enabled': False},
-                'streaming': {'enabled': False}
+                'streaming': {'enabled': False},
+                'tools': {'enabled': False}
             }
 
     def _save_settings(self, settings: Dict) -> None:
