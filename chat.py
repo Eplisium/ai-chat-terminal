@@ -562,10 +562,11 @@ class AIChat:
                                             # Handle tool calls in streaming mode
                                             tool_call = chunk['choices'][0]['delta']['tool_calls'][0]
                                             if 'function' in tool_call:
-                                                # Add the assistant's tool call message
+                                                # Add the assistant's initial message and tool call
+                                                initial_content = chunk['choices'][0]['delta'].get('content')
                                                 assistant_message = {
                                                     "role": "assistant",
-                                                    "content": None,
+                                                    "content": initial_content,
                                                     "tool_calls": [tool_call]
                                                 }
                                                 messages.append(assistant_message)
@@ -584,8 +585,8 @@ class AIChat:
                                                 # Make a new request to get the AI's natural response
                                                 request_data["messages"] = messages
                                                 request_data["stream"] = False
-                                                request_data["tools"] = None  # Remove tools to avoid recursive tool calls
-                                                request_data["tool_choice"] = None
+                                                request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                                                request_data.pop("tool_choice", None)
                                                 
                                                 response = requests.post(
                                                     f"{self.api_base}/chat/completions",
@@ -594,7 +595,11 @@ class AIChat:
                                                 )
                                                 response.raise_for_status()
                                                 data = response.json()
-                                                partial_response = data['choices'][0]['message']['content'].strip()
+                                                
+                                                if 'choices' in data and len(data['choices']) > 0:
+                                                    partial_response = data['choices'][0]['message']['content'].strip()
+                                                else:
+                                                    partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + result
                                     except json.JSONDecodeError:
                                         continue
                     else:
@@ -613,10 +618,11 @@ class AIChat:
                             tool_results = []
                             tool_messages = []
                             
-                            # First, add the assistant's tool call message
+                            # First, add the assistant's initial message and tool call
+                            initial_content = data['choices'][0]['message'].get('content')
                             assistant_message = {
                                 "role": "assistant",
-                                "content": None,
+                                "content": initial_content,
                                 "tool_calls": data['choices'][0]['message']['tool_calls']
                             }
                             messages.append(assistant_message)
@@ -639,8 +645,8 @@ class AIChat:
                             
                             # Make a second request to get the AI's natural response
                             request_data["messages"] = messages
-                            request_data["tools"] = None  # Remove tools to avoid recursive tool calls
-                            request_data["tool_choice"] = None
+                            request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                            request_data.pop("tool_choice", None)
                             
                             response = requests.post(
                                 f"{self.api_base}/chat/completions",
@@ -649,7 +655,11 @@ class AIChat:
                             )
                             response.raise_for_status()
                             data = response.json()
-                            partial_response = data['choices'][0]['message']['content'].strip()
+                            
+                            if 'choices' in data and len(data['choices']) > 0:
+                                partial_response = data['choices'][0]['message']['content'].strip()
+                            else:
+                                partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + " ".join(tool_results)
                         else:
                             partial_response = data['choices'][0]['message']['content'].strip()
 
