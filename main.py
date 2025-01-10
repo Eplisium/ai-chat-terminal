@@ -623,6 +623,7 @@ class AIChatApp:
                 ("═══ Agent Settings ═══", None),
                 (f"Current Status: {self._get_agent_status_display()}", None),
                 (f"Current Store: {current_store}", None),
+                ("Select Embedding Model", "model"),
                 ("Toggle Agent", "toggle"),
                 ("Test Embeddings", "test_embeddings"),
                 ("ChromaDB Settings", "chromadb_settings"),
@@ -640,7 +641,6 @@ class AIChatApp:
                     choices.extend([
                         ("Manage Store", "manage_store"),
                         ("Test Search", "test"),
-                        ("Select Embedding Model", "model"),
                     ])
 
             choices.extend([
@@ -917,6 +917,8 @@ class AIChatApp:
                     self.console.input("\nPress Enter to continue...")
 
             elif answer['action'] == "model":
+                if not self.chroma_manager:
+                    self.chroma_manager = ChromaManager(self.logger, self.console)
                 self.chroma_manager.select_embedding_model()
 
     def manage_store(self):
@@ -1332,6 +1334,8 @@ class AIChatApp:
                             self.console.print("[red]Failed to delete store[/red]")
 
             elif answer['action'] == "model":
+                if not self.chroma_manager:
+                    self.chroma_manager = ChromaManager(self.logger, self.console)
                 self.chroma_manager.select_embedding_model()
 
     def display_main_menu(self):
