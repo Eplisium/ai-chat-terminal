@@ -23,6 +23,7 @@
   - [Agent Setup](#agent-setup)
 - [Usage](#-usage)
 - [License](#-license)
+- [Forking the Repository](#-forking-the-repository)
 
 ## ✨ Key Features
 
@@ -188,3 +189,22 @@ The interface provides:
 ## 📝 License
 
 ACT Community License - See [LICENSE](LICENSE) file 
+
+## 🍴 Forking the Repository
+
+### How to Fork
+
+To fork this repository, follow these steps:
+
+1. Go to the repository page on GitHub: [Eplisium/ai-chat-terminal](https://github.com/eplisium/ai-chat-terminal).
+2. Click the "Fork" button at the top right of the page.
+3. Choose your GitHub account or organization where you want to create the fork.
+4. After the fork is created, you can clone it to your local machine using the URL of your forked repository.
+
+### Benefits of Forking
+
+Forking this repository allows you to:
+
+- Experiment with the code without affecting the original project.
+- Contribute to the project by submitting pull requests.
+- Customize the project to fit your specific needs.
