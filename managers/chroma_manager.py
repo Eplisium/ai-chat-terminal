@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 import os
 import errno
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ import inquirer
 import glob
 import datetime
 import time
+import uuid
 
 class FileContent(BaseModel):
     """Model for file content"""
@@ -115,94 +117,173 @@ class ChromaManager:
             self.console.print(f"[red]Embeddings test failed: {str(e)}[/red]")
             return False
 
-    def refresh_store(self, directory_path: str = None, files: List[str] = None) -> bool:
-        """Refresh the current store with the same directory or specific files"""
+    def _update_store_metadata(self, directory_path: str = None, files: List[str] = None) -> None:
+        """Update store metadata with processed directories and files"""
+        if not self.store_name:
+            return
+
+        store_path = os.path.join(self.persist_directory, self.store_name)
+        metadata_path = os.path.join(store_path, 'metadata.json')
+        
+        try:
+            # Load existing metadata
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+            else:
+                metadata = {}
+
+            # Preserve essential store information
+            if 'name' not in metadata:
+                metadata['name'] = self.store_name
+            if 'embedding_model' not in metadata:
+                metadata['embedding_model'] = self.embedding_model_name
+            if 'embedding_dimensions' not in metadata and self.embedding_model_name:
+                metadata['embedding_dimensions'] = self.EMBEDDING_MODELS[self.embedding_model_name]['dimensions']
+            if 'created_at' not in metadata:
+                metadata['created_at'] = datetime.datetime.now().isoformat()
+
+            # Initialize or update history
+            if 'history' not in metadata:
+                metadata['history'] = {
+                    'directories': [],
+                    'files': [],
+                    'last_processed': None,
+                    'processing_log': []
+                }
+
+            # Update with new directory
+            if directory_path:
+                abs_path = os.path.abspath(directory_path)
+                if abs_path not in metadata['history']['directories']:
+                    metadata['history']['directories'].append(abs_path)
+                metadata['last_directory'] = abs_path  # Keep for backward compatibility
+                # Log directory processing
+                metadata['history']['processing_log'].append({
+                    'type': 'directory',
+                    'path': abs_path,
+                    'timestamp': datetime.datetime.now().isoformat(),
+                    'status': 'added'
+                })
+
+            # Update with new files
+            if files:
+                abs_files = [os.path.abspath(f) for f in files if os.path.exists(f)]
+                for file in abs_files:
+                    if file not in metadata['history']['files']:
+                        metadata['history']['files'].append(file)
+                        # Log file processing
+                        metadata['history']['processing_log'].append({
+                            'type': 'file',
+                            'path': file,
+                            'timestamp': datetime.datetime.now().isoformat(),
+                            'status': 'added'
+                        })
+
+            # Update timestamp
+            metadata['history']['last_processed'] = datetime.datetime.now().isoformat()
+
+            # Save updated metadata
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=4)
+
+        except Exception as e:
+            self.logger.error(f"Error updating metadata: {e}")
+
+    def refresh_store(self) -> bool:
+        """Refresh all contents of the current store"""
         try:
             if not self.vectorstore:
                 self.logger.error("No store currently loaded")
                 return False
 
-            # Get current store name and metadata before recreating
+            self.console.print("[cyan]Starting store refresh...[/cyan]")
+
+            # Get current store name and metadata
             current_store_name = self.store_name
             store_path = os.path.join(self.persist_directory, current_store_name)
             metadata_path = os.path.join(store_path, 'metadata.json')
-            last_directory = None
-
-            # Try to get the last directory from metadata
+            
+            # Load existing metadata
+            existing_metadata = None
             try:
                 if os.path.exists(metadata_path):
                     with open(metadata_path, 'r') as f:
-                        metadata = json.load(f)
-                        last_directory = metadata.get('last_directory')
+                        existing_metadata = json.load(f)
             except Exception as e:
-                self.logger.error(f"Error reading metadata: {e}")
-
-            # Use provided directory, files, or last directory
-            target_directory = directory_path or last_directory
-            if not target_directory and not files:
-                self.console.print("[yellow]No directory or files specified for refresh[/yellow]")
+                self.logger.error(f"Error reading existing metadata: {e}")
                 return False
 
-            # Unload current store
-            self.unload_store()
-
-            # Delete the existing store
-            try:
-                store_path = os.path.join(self.persist_directory, current_store_name)
-                if os.path.exists(store_path):
-                    import shutil
-                    def handle_remove_readonly(func, path, exc_info):
-                        """Handle read-only files during deletion"""
-                        import stat
-                        if func in (os.unlink, os.rmdir) and exc_info[1].errno == errno.EACCES:
-                            os.chmod(path, stat.S_IWRITE)
-                            func(path)
-                    shutil.rmtree(store_path, onerror=handle_remove_readonly)
-            except Exception as e:
-                self.logger.error(f"Error deleting store directory: {e}")
+            if not existing_metadata or 'history' not in existing_metadata:
+                self.console.print("[yellow]No history found in store metadata[/yellow]")
                 return False
 
-            # Create a new store with the same name
-            if not self.create_store(current_store_name):
-                self.logger.error("Failed to recreate store")
-                return False
+            # Get all tracked files
+            tracked_files = existing_metadata['history'].get('files', [])
 
-            # Process the directory or files
-            if target_directory:
-                self.console.print(f"[cyan]Using directory: {target_directory}[/cyan]")
-                return self.process_directory(target_directory, force_refresh=True)
-            elif files:
-                # Read and process specific files
-                processed_files = []
-                for filepath in files:
+            self.console.print(f"[cyan]Found {len(tracked_files)} files to process[/cyan]")
+
+            all_files = []
+            processed_paths = set()
+
+            # Process all tracked files
+            for file_path in tracked_files:
+                if os.path.exists(file_path):
                     try:
-                        if os.path.exists(filepath):
-                            with open(filepath, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                filename = os.path.basename(filepath)
-                                processed_files.append(FileContent(
-                                    filename=filename,
-                                    content=content,
-                                    file_type=os.path.splitext(filename)[1]
-                                ))
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            filename = os.path.basename(file_path)
+                            file_content = FileContent(
+                                filename=filename,
+                                content=content,
+                                file_type=os.path.splitext(filename)[1]
+                            )
+                            all_files.append((file_content, os.path.dirname(file_path)))
+                            processed_paths.add(file_path)
+                            self.console.print(f"[cyan]Processed file: {filename}[/cyan]")
                     except Exception as e:
-                        self.logger.error(f"Error reading {filepath}: {str(e)}")
+                        self.logger.error(f"Error reading {file_path}: {str(e)}")
+                        self.console.print(f"[yellow]Error reading file: {file_path}[/yellow]")
+                else:
+                    self.console.print(f"[yellow]File no longer exists: {file_path}[/yellow]")
 
-                if processed_files:
-                    # Create documents for ChromaDB
-                    self.console.print("[cyan]Creating embeddings for updated files...[/cyan]")
-                    documents = [
-                        f"File: {file.filename}\nContent:\n{file.content}"
-                        for file in processed_files
-                    ]
-                    
-                    # Store in ChromaDB
-                    self.vectorstore.add_texts(documents)
-                    self.console.print("[green]Successfully refreshed files in ChromaDB store[/green]")
-                    return True
+            if all_files:
+                # Clear existing documents
+                self.console.print("[cyan]Clearing existing documents...[/cyan]")
+                self.clear_store()
+                
+                # Create documents for ChromaDB
+                self.console.print("[cyan]Creating embeddings for files...[/cyan]")
+                from langchain_core.documents import Document
+                
+                documents = []
+                for file_content, directory in all_files:
+                    doc = Document(
+                        page_content=f"File: {file_content.filename}\nContent:\n{file_content.content}",
+                        metadata={
+                            'filename': file_content.filename,
+                            'file_type': file_content.file_type,
+                            'directory': directory,
+                            'added_at': datetime.datetime.now().isoformat(),
+                            'file_size': len(file_content.content.encode('utf-8')),
+                            'source': 'refresh',
+                            'id': str(uuid.uuid4())
+                        }
+                    )
+                    documents.append(doc)
+                
+                # Update the store with new documents
+                self.vectorstore.add_documents(documents)
+                
+                # Update metadata
+                self._update_store_metadata()
+                
+                self.console.print(f"[green]Successfully refreshed store with {len(all_files)} files[/green]")
+                return True
+            else:
+                self.console.print("[yellow]No files found to refresh[/yellow]")
+                return True
 
-            return False
-            
         except Exception as e:
             self.logger.error(f"Error refreshing store: {str(e)}")
             self.console.print(f"[red]Error refreshing store: {str(e)}[/red]")
@@ -252,7 +333,7 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
 
-    def read_directory(self, directory_path: str, force_refresh: bool = False) -> List[FileContent]:
+    def read_directory(self, directory_path: str, include_subdirs: bool = True) -> List[FileContent]:
         """Read all files in the directory matching the configured patterns"""
         try:
             settings = self._load_settings()
@@ -262,89 +343,208 @@ class ChromaManager:
             max_size_mb = chromadb_settings.get('max_file_size_mb', 5)
             
             files = []
-            self.console.print("[cyan]Reading files...")
+            processed_paths = set()  # Track processed paths to avoid duplicates
+            
+            # Clean and normalize directory path
+            directory_path = directory_path.strip('"\'')  # Remove quotes if present
+            directory_path = os.path.abspath(directory_path)
+            if not os.path.exists(directory_path):
+                self.console.print(f"[yellow]Directory not found: {directory_path}[/yellow]")
+                return []
+            
+            self.console.print(f"[cyan]Reading files from: {directory_path}[/cyan]")
             
             # Create glob patterns for each file type
             for file_type in file_types:
-                pattern = os.path.join(directory_path, f"**/*{file_type}")
-                for filepath in glob.glob(pattern, recursive=True):
-                    try:
-                        # Check if file should be excluded
-                        if any(exclude in filepath for exclude in exclude_patterns):
+                pattern = os.path.join(directory_path, f"**/*{file_type}" if include_subdirs else f"*{file_type}")
+                try:
+                    for filepath in glob.glob(pattern, recursive=include_subdirs):
+                        try:
+                            # Skip if already processed
+                            if filepath in processed_paths:
+                                continue
+                            
+                            # Convert to absolute path and normalize
+                            abs_path = os.path.abspath(filepath)
+                            
+                            # Skip if path contains any exclude pattern
+                            if any(exclude in abs_path for exclude in exclude_patterns):
+                                self.logger.debug(f"Skipping excluded path: {abs_path}")
+                                continue
+                            
+                            # Check file size
+                            try:
+                                file_size_mb = os.path.getsize(abs_path) / (1024 * 1024)
+                                if file_size_mb > max_size_mb:
+                                    self.logger.warning(f"Skipping {abs_path}: File too large ({file_size_mb:.1f}MB > {max_size_mb}MB)")
+                                    continue
+                            except OSError as e:
+                                self.logger.error(f"Error checking file size for {abs_path}: {e}")
+                                continue
+                            
+                            # Try different encodings
+                            content = None
+                            encodings = ['utf-8', 'latin1', 'cp1252', 'ascii']
+                            for encoding in encodings:
+                                try:
+                                    with open(abs_path, 'r', encoding=encoding) as f:
+                                        content = f.read()
+                                        break
+                                except UnicodeDecodeError:
+                                    continue
+                                except Exception as e:
+                                    self.logger.error(f"Error reading {abs_path} with {encoding}: {e}")
+                                    break
+                            
+                            if content is not None:
+                                filename = os.path.basename(abs_path)
+                                file_type = os.path.splitext(filename)[1]
+                                files.append(FileContent(
+                                    filename=filename,
+                                    content=content,
+                                    file_type=file_type
+                                ))
+                                processed_paths.add(abs_path)
+                                self.console.print(f"[cyan]Read: {filename} ({file_size_mb:.1f}MB)[/cyan]")
+                            else:
+                                self.logger.warning(f"Could not read {abs_path} with any supported encoding")
+                                
+                        except Exception as e:
+                            self.logger.error(f"Error processing {filepath}: {str(e)}")
                             continue
-                        
-                        # Check file size
-                        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-                        if file_size_mb > max_size_mb:
-                            self.logger.warning(f"Skipping {filepath}: File too large ({file_size_mb:.1f}MB > {max_size_mb}MB)")
-                            continue
-                        
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            filename = os.path.basename(filepath)
-                            file_type = os.path.splitext(filename)[1]
-                            files.append(FileContent(
-                                filename=filename,
-                                content=content,
-                                file_type=file_type
-                            ))
-                            self.console.print(f"[cyan]Read: {filename}")
-                    except Exception as e:
-                        self.logger.error(f"Error reading {filepath}: {str(e)}")
+                            
+                except Exception as e:
+                    self.logger.error(f"Error with glob pattern {pattern}: {str(e)}")
+                    continue
+            
+            if not files:
+                self.console.print("[yellow]No valid files found in directory[/yellow]")
+            else:
+                self.console.print(f"[green]Successfully read {len(files)} files[/green]")
             
             return files
             
         except Exception as e:
             self.logger.error(f"Error reading directory: {str(e)}")
+            self.console.print(f"[red]Error reading directory: {str(e)}[/red]")
             return []
 
-    def process_directory(self, directory_path: str, force_refresh: bool = False) -> bool:
+    def process_directory(self, directory_path: str, include_subdirs: bool = True, force_refresh: bool = False, skip_subdirs_prompt: bool = False) -> bool:
         """Process all files in a directory and add them to the current store"""
         try:
             if not self.vectorstore:
                 self.logger.error("No store currently loaded")
                 return False
             
-            # Save the directory path for future refreshes
+            # Clean and normalize directory path
+            directory_path = directory_path.strip('"\'')  # Remove quotes if present
+            directory_path = os.path.abspath(directory_path)
+            if not os.path.exists(directory_path):
+                self.console.print(f"[yellow]Directory not found: {directory_path}[/yellow]")
+                return False
+
+            # If include_subdirs is True and not skipping prompt, let user select which subdirectories to include
+            selected_dirs = [directory_path]  # Always include the root directory
+            if include_subdirs and not skip_subdirs_prompt:
+                # Get list of subdirectories
+                subdirs = []
+                for root, dirs, _ in os.walk(directory_path):
+                    for d in dirs:
+                        full_path = os.path.join(root, d)
+                        rel_path = os.path.relpath(full_path, directory_path)
+                        subdirs.append((rel_path, full_path))
+                
+                if subdirs:
+                    # Let user select which subdirectories to include
+                    questions = [
+                        inquirer.Checkbox('selected_subdirs',
+                            message="Select subdirectories to include",
+                            choices=[('(root directory)', directory_path)] + [(d[0], d[1]) for d in subdirs],
+                            default=[directory_path]
+                        ),
+                    ]
+                    subdir_answer = inquirer.prompt(questions)
+                    
+                    if subdir_answer and subdir_answer['selected_subdirs']:
+                        selected_dirs = subdir_answer['selected_subdirs']
+            elif include_subdirs:
+                # If skipping prompt but include_subdirs is True, include all subdirectories
+                for root, dirs, _ in os.walk(directory_path):
+                    for d in dirs:
+                        selected_dirs.append(os.path.join(root, d))
+            
+            # Process each selected directory
+            all_files = []
+            processed_paths = set()  # Track processed paths to avoid duplicates
+            
+            # Save the root directory path and update metadata
             if self.store_name:
-                store_path = os.path.join(self.persist_directory, self.store_name)
-                metadata_path = os.path.join(store_path, 'metadata.json')
+                self._update_store_metadata(directory_path=directory_path)
+            
+            # Read files from root directory first
+            files = self.read_directory(directory_path, include_subdirs=False)
+            for file in files:
+                file_path = os.path.join(directory_path, file.filename)
+                if file_path not in processed_paths:
+                    doc = Document(
+                        page_content=f"File: {file.filename}\nContent:\n{file.content}",
+                        metadata={
+                            'filename': file.filename,
+                            'file_type': file.file_type,
+                            'directory': directory_path,
+                            'added_at': datetime.datetime.now().isoformat(),
+                            'file_size': len(file.content.encode('utf-8')),
+                            'source': 'directory_process',
+                            'id': str(uuid.uuid4())
+                        }
+                    )
+                    all_files.append(doc)
+                    processed_paths.add(file_path)
+                    # Update metadata for individual files
+                    self._update_store_metadata(files=[file_path])
+            
+            # Process selected subdirectories
+            for dir_path in selected_dirs:
+                if dir_path != directory_path:  # Skip root directory as it's already processed
+                    # Save the directory path and update metadata
+                    if self.store_name:
+                        self._update_store_metadata(directory_path=dir_path)
+                    
+                    # Read files from this directory
+                    files = self.read_directory(dir_path, include_subdirs=False)
+                    for file in files:
+                        file_path = os.path.join(dir_path, file.filename)
+                        if file_path not in processed_paths:
+                            doc = Document(
+                                page_content=f"File: {file.filename}\nContent:\n{file.content}",
+                                metadata={
+                                    'filename': file.filename,
+                                    'file_type': file.file_type,
+                                    'directory': dir_path,
+                                    'added_at': datetime.datetime.now().isoformat(),
+                                    'file_size': len(file.content.encode('utf-8')),
+                                    'source': 'directory_process',
+                                    'id': str(uuid.uuid4())
+                                }
+                            )
+                            all_files.append(doc)
+                            processed_paths.add(file_path)
+                            # Update metadata for individual files
+                            self._update_store_metadata(files=[file_path])
+            
+            if all_files:
+                # Store in ChromaDB with metadata
                 try:
-                    if os.path.exists(metadata_path):
-                        with open(metadata_path, 'r') as f:
-                            metadata = json.load(f)
-                    else:
-                        metadata = {}
-                    
-                    metadata['last_directory'] = os.path.abspath(directory_path)
-                    metadata['last_processed'] = datetime.datetime.now().isoformat()
-                    
-                    with open(metadata_path, 'w') as f:
-                        json.dump(metadata, f, indent=4)
+                    self.vectorstore.add_documents(all_files)
+                    self.console.print(f"[green]Successfully added {len(all_files)} files to store[/green]")
+                    return True
                 except Exception as e:
-                    self.logger.error(f"Error updating metadata: {e}")
-            
-            # Only read and embed files if vectorstore is empty or force refresh is True
-            if force_refresh or self.vectorstore._collection.count() == 0:
-                self.console.print("[cyan]Reading directory contents...")
-                files = self.read_directory(directory_path)
-                
-                if not files:
-                    self.console.print("[yellow]No valid files found to process[/yellow]")
+                    self.logger.error(f"Error adding documents to store: {e}")
+                    self.console.print(f"[red]Error adding documents to store: {str(e)}[/red]")
                     return False
-                
-                # Create documents for ChromaDB
-                self.console.print("[cyan]Creating embeddings...")
-                documents = [
-                    f"File: {file.filename}\nContent:\n{file.content}"
-                    for file in files
-                ]
-                
-                # Store in ChromaDB
-                self.vectorstore.add_texts(documents)
-                self.console.print("[green]Successfully added files to ChromaDB store[/green]")
-            
-            return True
+            else:
+                self.console.print("[yellow]No valid files found to process[/yellow]")
+                return False
             
         except Exception as e:
             self.logger.error(f"Error processing directory: {str(e)}")
@@ -508,7 +708,13 @@ class ChromaManager:
                 'name': store_name,
                 'created_at': datetime.datetime.now().isoformat(),
                 'embedding_model': current_model,
-                'embedding_dimensions': self.EMBEDDING_MODELS[current_model]['dimensions']
+                'embedding_dimensions': self.EMBEDDING_MODELS[current_model]['dimensions'],
+                'history': {
+                    'directories': [],
+                    'files': [],
+                    'last_processed': None,
+                    'processing_log': []
+                }
             }
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, indent=4)
@@ -528,18 +734,78 @@ class ChromaManager:
             self.console.print(f"[red]Error creating store: {str(e)}[/red]")
             return False
     
-    def add_file_to_store(self, filepath: str, content: str) -> bool:
+    def add_file_to_store(self, filepath: str) -> bool:
         """Add a file's content to the current store"""
         try:
             if not self.vectorstore:
                 self.logger.error("No store currently loaded")
                 return False
             
-            document = f"File: {filepath}\nContent:\n{content}"
-            self.vectorstore.add_texts([document])
-            return True
+            # Normalize path and check file
+            abs_path = os.path.abspath(filepath)
+            if not os.path.exists(abs_path):
+                self.console.print(f"[yellow]File not found: {abs_path}[/yellow]")
+                return False
+            
+            # Check file size
+            settings = self._load_settings()
+            max_size_mb = settings.get('chromadb', {}).get('max_file_size_mb', 5)
+            file_size_mb = os.path.getsize(abs_path) / (1024 * 1024)
+            if file_size_mb > max_size_mb:
+                self.console.print(f"[yellow]File too large: {file_size_mb:.1f}MB > {max_size_mb}MB[/yellow]")
+                return False
+            
+            # Try different encodings
+            content = None
+            encodings = ['utf-8', 'latin1', 'cp1252', 'ascii']
+            for encoding in encodings:
+                try:
+                    with open(abs_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        break
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    self.logger.error(f"Error reading file with {encoding}: {e}")
+                    break
+            
+            if content is None:
+                self.console.print("[yellow]Could not read file with any supported encoding[/yellow]")
+                return False
+            
+            # Create document with metadata
+            filename = os.path.basename(abs_path)
+            file_type = os.path.splitext(filename)[1]
+            
+            from langchain_core.documents import Document
+            doc = Document(
+                page_content=f"File: {filename}\nContent:\n{content}",
+                metadata={
+                    'filename': filename,
+                    'file_type': file_type,
+                    'directory': os.path.dirname(abs_path),
+                    'added_at': datetime.datetime.now().isoformat(),
+                    'file_size': len(content.encode('utf-8')),
+                    'source': 'single_file_add',
+                    'id': str(uuid.uuid4())
+                }
+            )
+            
+            # Add to ChromaDB
+            try:
+                self.vectorstore.add_documents([doc])
+                # Update metadata
+                self._update_store_metadata(files=[abs_path])
+                self.console.print(f"[green]Successfully added file: {filename}[/green]")
+                return True
+            except Exception as e:
+                self.logger.error(f"Error adding file to store: {e}")
+                self.console.print(f"[red]Error adding file to store: {str(e)}[/red]")
+                return False
+            
         except Exception as e:
             self.logger.error(f"Error adding file to store: {e}")
+            self.console.print(f"[red]Error adding file to store: {str(e)}[/red]")
             return False
     
     def search_context(self, query: str, k: int = None) -> List[str]:
@@ -559,6 +825,105 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error searching context: {e}")
             return []
+
+    def get_all_documents(self) -> List[Dict[str, Any]]:
+        """Get all documents in the current store with their IDs"""
+        try:
+            if not self.vectorstore:
+                self.logger.error("No store currently loaded")
+                return []
+            
+            collection = self.vectorstore._collection
+            result = collection.get()
+            
+            documents = []
+            for i, doc in enumerate(result['documents']):
+                doc_id = result['ids'][i] if 'ids' in result else f"doc_{i}"
+                metadata = result['metadatas'][i] if 'metadatas' in result else {}
+                documents.append({
+                    'id': doc_id,
+                    'content': doc,
+                    'metadata': metadata
+                })
+            
+            return documents
+        except Exception as e:
+            self.logger.error(f"Error getting documents: {e}")
+            return []
+
+    def delete_documents(self, doc_ids: List[str]) -> bool:
+        """Delete specific documents from the store by their IDs"""
+        try:
+            if not self.vectorstore:
+                self.logger.error("No store currently loaded")
+                return False
+            
+            self.vectorstore._collection.delete(ids=doc_ids)
+            self.console.print(f"[green]Successfully deleted {len(doc_ids)} documents[/green]")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error deleting documents: {e}")
+            self.console.print(f"[red]Error deleting documents: {str(e)}[/red]")
+            return False
+
+    def update_document(self, doc_id: str, new_content: str) -> bool:
+        """Update a specific document in the store"""
+        try:
+            if not self.vectorstore:
+                self.logger.error("No store currently loaded")
+                return False
+            
+            # Create new embedding for the updated content
+            self.vectorstore._collection.update(
+                ids=[doc_id],
+                documents=[new_content]
+            )
+            self.console.print(f"[green]Successfully updated document: {doc_id}[/green]")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error updating document: {e}")
+            self.console.print(f"[red]Error updating document: {str(e)}[/red]")
+            return False
+
+    def clear_store(self) -> bool:
+        """Remove all documents from the current store while preserving metadata"""
+        try:
+            if not self.vectorstore:
+                self.logger.error("No store currently loaded")
+                return False
+            
+            # Get all document IDs
+            documents = self.get_all_documents()
+            if not documents:
+                return True  # Store is already empty
+            
+            doc_ids = [doc['id'] for doc in documents]
+            self.vectorstore._collection.delete(ids=doc_ids)
+            
+            # Log the clearing operation in metadata
+            if self.store_name:
+                self._update_store_metadata()  # Just update timestamp
+                store_path = os.path.join(self.persist_directory, self.store_name)
+                metadata_path = os.path.join(store_path, 'metadata.json')
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    metadata['history']['processing_log'].append({
+                        'type': 'clear',
+                        'timestamp': datetime.datetime.now().isoformat(),
+                        'status': 'success',
+                        'documents_cleared': len(doc_ids)
+                    })
+                    with open(metadata_path, 'w') as f:
+                        json.dump(metadata, f, indent=4)
+                except Exception as e:
+                    self.logger.error(f"Error updating metadata after clear: {e}")
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Error clearing store: {e}")
+            self.console.print(f"[red]Error clearing store: {str(e)}[/red]")
+            return False
     
     def delete_store(self, store_name: str) -> bool:
         """Delete a ChromaDB store"""

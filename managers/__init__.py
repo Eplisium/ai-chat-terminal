@@ -2,10 +2,12 @@ from .settings_manager import SettingsManager
 from .system_instructions_manager import SystemInstructionsManager
 from .data_manager import DataManager
 from .chroma_manager import ChromaManager
+from .stats_manager import StatsManager
 
 __all__ = [
     'SettingsManager',
     'SystemInstructionsManager',
     'DataManager',
-    'ChromaManager'
+    'ChromaManager',
+    'StatsManager'
 ] 

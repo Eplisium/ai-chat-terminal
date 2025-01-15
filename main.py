@@ -4,7 +4,8 @@ from managers import (
     SettingsManager,
     SystemInstructionsManager,
     DataManager,
-    ChromaManager
+    ChromaManager,
+    StatsManager
 )
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
 from typing import Dict, Any
@@ -23,6 +24,7 @@ class AIChatApp:
         self.settings_manager = SettingsManager(logger, console)
         self.data_manager = DataManager(logger, console)
         self.chroma_manager = ChromaManager(logger, console)
+        self.stats_manager = StatsManager(logger, console)
         
         # Load models from JSON
         try:
@@ -74,20 +76,51 @@ class AIChatApp:
 
     def add_to_favorites(self, model_config):
         """Add a model to favorites"""
-        model_id = f"{model_config.get('provider', 'unknown')}:{model_config['id']}"
+        model_id = model_config['id']
+        provider = model_config.get('provider', 'unknown')
         
-        if not any(f['id'] == model_config['id'] for f in self.favorites):
+        # Get the base name without provider prefix
+        display_name = model_config['name']
+        if provider == 'openrouter' and display_name.startswith(f"{model_id.split('/')[0].title()}: "):
+            # Name already has provider prefix, use it as is
+            display_name = model_config['name']
+        elif provider == 'openrouter' and '/' in model_id:
+            # Add provider prefix if not present
+            company = model_id.split('/')[0].title()
+            display_name = f"{company}: {display_name}"
+        
+        if not any(f['id'] == model_id for f in self.favorites):
+            # For OpenRouter models, use the description from the API response
+            if provider == 'openrouter':
+                description = model_config.get('description', f"{display_name} ({provider})")
+            else:
+                # For other providers, try to get description from models.json
+                description = None
+                models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+                if os.path.exists(models_path):
+                    try:
+                        with open(models_path, 'r') as f:
+                            models = json.load(f)['models']
+                            for model in models:
+                                if model['id'] == model_id:
+                                    description = model.get('description')
+                                    break
+                    except:
+                        pass
+                if not description:
+                    description = f"{display_name} ({provider})"
+            
             favorite = {
-                'id': model_config['id'],
-                'name': model_config['name'],
-                'provider': model_config.get('provider', 'unknown'),
-                'description': model_config.get('description', 'No description')
+                'id': model_id,
+                'name': display_name,
+                'provider': provider,
+                'description': description
             }
             self.favorites.append(favorite)
             self.save_favorites()
-            self.console.print(f"[green]Added {model_config['name']} to favorites[/green]")
+            self.console.print(f"[green]Added {display_name} to favorites[/green]")
         else:
-            self.console.print(f"[yellow]{model_config['name']} is already in favorites[/yellow]")
+            self.console.print(f"[yellow]{display_name} is already in favorites[/yellow]")
 
     def remove_from_favorites(self, model_id):
         """Remove a model from favorites"""
@@ -102,8 +135,19 @@ class AIChatApp:
             self.favorites.sort(key=lambda x: (x['provider'].lower(), x['name'].lower()))
         self.save_favorites()
 
+    def reload_favorites(self):
+        """Reload favorites from file"""
+        if os.path.exists(self.favorites_path):
+            with open(self.favorites_path, 'r') as f:
+                self.favorites = json.load(f)['favorites']
+        else:
+            self.favorites = []
+
     def manage_favorites(self):
         """Display favorites management menu"""
+        # Reload favorites from file
+        self.reload_favorites()
+        
         if not self.favorites:
             self.console.print("[yellow]No favorite models yet[/yellow]")
             return
@@ -152,6 +196,20 @@ class AIChatApp:
 
             if isinstance(answer['favorite'], dict):
                 selected = answer['favorite']
+                
+                # Display model description in a panel with enhanced styling
+                self.console.print()  # Add spacing
+                self.console.print(Panel(
+                    f"[bold white]Provider:[/bold white] [cyan]{selected['provider'].upper()}[/cyan]\n\n"
+                    f"[bold white]Description:[/bold white]\n[cyan]{selected.get('description', 'No description available')}[/cyan]",
+                    title=f"[bold cyan]★ {selected['name']}[/bold cyan]",
+                    title_align="left",
+                    border_style="bright_blue",
+                    padding=(1, 2),
+                    highlight=True
+                ))
+                self.console.print()  # Add spacing
+                
                 action_choices = [
                     ("Start Chat", "chat"),
                     ("Remove from Favorites", "remove"),
@@ -449,6 +507,7 @@ class AIChatApp:
                 ("=== Application Settings ===", None),
                 ("🔍 Appearance Settings", "appearance"),
                 ("🔍 Codebase Search Settings", "codebase"),
+                ("📊 ACT Statistics", "statistics"),
                 ("=== Data Management ===", None),
                 ("🗑️ Clear All Logs", "clear_logs"),
                 ("🗑️ Clear Chat History", "clear_chats"),
@@ -472,6 +531,8 @@ class AIChatApp:
                 self.settings_manager.manage_codebase_settings()
             elif answer['setting'] == "appearance":
                 self.settings_manager.manage_appearance_settings()
+            elif answer['setting'] == "statistics":
+                self.manage_statistics()
             elif answer['setting'] == "clear_logs":
                 confirm = inquirer.confirm("Are you sure you want to clear all logs?", default=False)
                 if confirm:
@@ -486,6 +547,8 @@ class AIChatApp:
         while True:
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
+            streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+            tools_enabled = settings.get('tools', {}).get('enabled', False)
             agent_active = (
                 agent_enabled and 
                 self.chroma_manager and 
@@ -501,10 +564,21 @@ class AIChatApp:
             else:
                 agent_status = "⭕ Disabled"
 
+            # Get streaming status
+            streaming_status = "🟢 Enabled" if streaming_enabled else "⭕ Disabled"
+
+            # Get tools status
+            tools_status = "🟢 Enabled" if tools_enabled else "⭕ Disabled"
+
+            # Get current instruction name
+            current_instruction = self.instructions_manager.get_current_name()
+
             choices = [
                 ("═══ AI Settings ═══", None),
                 (f"🤖 Agent           〈{agent_status}〉", "agent"),
-                ("🤖 System Instructions", "instructions"),
+                (f"🤖 Streaming Mode   〈{streaming_status}〉", "streaming"),
+                (f"🤖️ AI Tools         〈{tools_status}〉", "tools"),
+                (f"🤖 System Instructions 〈{current_instruction}〉", "instructions"),
                 ("📝 Model Context Settings", "contexts"),
                 ("Back to Main Menu", "back")
             ]
@@ -523,10 +597,81 @@ class AIChatApp:
 
             if answer['setting'] == "agent":
                 self.manage_agent_settings(agent_status)
+            elif answer['setting'] == "streaming":
+                # Toggle streaming mode
+                settings = self._load_settings()
+                if 'streaming' not in settings:
+                    settings['streaming'] = {}
+                settings['streaming']['enabled'] = not streaming_enabled
+                self._save_settings(settings)
+                new_status = "enabled" if not streaming_enabled else "disabled"
+                icon = "🟢" if not streaming_enabled else "⭕"
+                self.console.print(f"{icon} Streaming mode {new_status}")
+            elif answer['setting'] == "tools":
+                self.manage_tools_settings()
             elif answer['setting'] == "instructions":
                 self.manage_instructions()
             elif answer['setting'] == "contexts":
                 self.manage_model_contexts()
+
+    def manage_tools_settings(self):
+        """Manage AI tools settings"""
+        while True:
+            settings = self._load_settings()
+            tools_settings = settings.get('tools', {})
+            tools_enabled = tools_settings.get('enabled', False)
+            available_tools = tools_settings.get('available_tools', {})
+
+            choices = [
+                ("═══ AI Tools Settings ═══", None),
+                (f"Tools Status: {'🟢 Enabled' if tools_enabled else '⭕ Disabled'}", None),
+                ("Toggle Tools", "toggle"),
+                ("═══ Available Tools ═══", None)
+            ]
+
+            # Add available tools with their status
+            for tool_name, tool_info in available_tools.items():
+                status = "✓" if tool_info.get('enabled', True) else "✗"
+                choices.append((
+                    f"{tool_name.title()}: {status} - {tool_info.get('description', 'No description')}",
+                    f"toggle_{tool_name}"
+                ))
+
+            choices.extend([
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ])
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage AI Tools",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "toggle":
+                # Toggle overall tools feature
+                tools_settings['enabled'] = not tools_enabled
+                settings['tools'] = tools_settings
+                self._save_settings(settings)
+                new_status = "enabled" if not tools_enabled else "disabled"
+                icon = "🟢" if not tools_enabled else "⭕"
+                self.console.print(f"{icon} AI tools {new_status}")
+            elif answer['action'].startswith("toggle_"):
+                # Toggle individual tool
+                tool_name = answer['action'][7:]  # Remove "toggle_" prefix
+                if tool_name in available_tools:
+                    available_tools[tool_name]['enabled'] = not available_tools[tool_name].get('enabled', True)
+                    settings['tools']['available_tools'] = available_tools
+                    self._save_settings(settings)
+                    new_status = "enabled" if available_tools[tool_name]['enabled'] else "disabled"
+                    icon = "✓" if available_tools[tool_name]['enabled'] else "✗"
+                    self.console.print(f"{icon} {tool_name.title()} tool {new_status}")
 
     def manage_agent_settings(self, agent_status):
         """Manage Agent settings"""
@@ -534,6 +679,7 @@ class AIChatApp:
             settings = self._load_settings()
             agent_settings = settings.get('agent', {})
             agent_enabled = agent_settings.get('enabled', False)
+            stores = self.chroma_manager.list_stores()  # Get list of stores
             
             current_store = "None"
             if self.chroma_manager and self.chroma_manager.store_name:
@@ -543,6 +689,7 @@ class AIChatApp:
                 ("═══ Agent Settings ═══", None),
                 (f"Current Status: {self._get_agent_status_display()}", None),
                 (f"Current Store: {current_store}", None),
+                ("Select Embedding Model", "model"),
                 ("Toggle Agent", "toggle"),
                 ("Test Embeddings", "test_embeddings"),
                 ("ChromaDB Settings", "chromadb_settings"),
@@ -554,14 +701,12 @@ class AIChatApp:
                     ("Create New Store", "create"),
                     ("Select Store", "select"),
                     ("Delete Store", "delete"),
-                    ("Process Directory", "process"),
                 ])
 
                 if self.chroma_manager and self.chroma_manager.store_name:
                     choices.extend([
+                        ("Manage Store", "manage_store"),
                         ("Test Search", "test"),
-                        ("Refresh Store", "refresh"),
-                        ("Select Embedding Model", "model"),
                     ])
 
             choices.extend([
@@ -590,13 +735,16 @@ class AIChatApp:
                 new_status = "enabled" if not agent_enabled else "disabled"
                 icon = "🟡" if not agent_enabled else "⭕"
                 self.console.print(f"{icon} Agent {new_status}")
-                return True  # Return True to indicate menu should be refreshed
+                continue  # Continue the loop instead of returning
 
             elif answer['action'] == "test_embeddings":
                 if not self.chroma_manager:
                     self.console.print("[yellow]Please enable the agent first[/yellow]")
                     continue
                 self.chroma_manager.test_embeddings()
+
+            elif answer['action'] == "manage_store":
+                self.manage_store()
 
             elif answer['action'] == "chromadb_settings":
                 if not self.chroma_manager:
@@ -739,51 +887,6 @@ class AIChatApp:
                     settings['chromadb'] = chromadb_settings
                     self._save_settings(settings)
 
-            elif answer['action'] == "refresh":
-                if not self.chroma_manager or not self.chroma_manager.store_name:
-                    self.console.print("[yellow]Please select a store first[/yellow]")
-                    continue
-
-                refresh_choices = [
-                    ("Refresh Using Last Directory", "last"),
-                    ("Refresh Different Directory", "directory"),
-                    ("Refresh Specific Files", "files"),
-                    ("Back", None)
-                ]
-
-                refresh_question = [
-                    inquirer.List('refresh_type',
-                        message="Select Refresh Type",
-                        choices=refresh_choices,
-                        carousel=True
-                    ),
-                ]
-
-                refresh_answer = inquirer.prompt(refresh_question)
-                if refresh_answer and refresh_answer['refresh_type']:
-                    if refresh_answer['refresh_type'] == "last":
-                        self.chroma_manager.refresh_store()
-                    elif refresh_answer['refresh_type'] == "directory":
-                        dir_question = [
-                            inquirer.Text('directory',
-                                message="Enter directory path to refresh",
-                                default="."
-                            )
-                        ]
-                        dir_answer = inquirer.prompt(dir_question)
-                        if dir_answer:
-                            self.chroma_manager.refresh_store(directory_path=dir_answer['directory'])
-                    else:  # files
-                        files_question = [
-                            inquirer.Text('files',
-                                message="Enter file paths (comma-separated)",
-                            )
-                        ]
-                        files_answer = inquirer.prompt(files_question)
-                        if files_answer:
-                            files = [f.strip() for f in files_answer['files'].split(',')]
-                            self.chroma_manager.refresh_store(files=files)
-
             elif answer['action'] == "create":
                 name_question = [
                     inquirer.Text('name',
@@ -796,22 +899,25 @@ class AIChatApp:
                 if name_answer:
                     if self.chroma_manager.create_store(name_answer['name']):
                         if inquirer.confirm("Would you like to process a directory now?", default=True):
-                            dir_question = [
+                            dir_questions = [
                                 inquirer.Text('directory',
                                     message="Enter directory path to process",
-                                    default="."
-                                )
+                                    validate=lambda _, x: os.path.exists(x.strip('"\''))
+                                ),
+                                inquirer.Confirm('include_subdirs',
+                                    message="Include subdirectories?",
+                                    default=True
+                                ),
                             ]
-                            dir_answer = inquirer.prompt(dir_question)
+                            dir_answer = inquirer.prompt(dir_questions)
                             if dir_answer:
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+                                directory_path = dir_answer['directory'].strip('"\'')
+                                include_subdirs = dir_answer['include_subdirs']
+                                self.chroma_manager.process_directory(directory_path, include_subdirs=include_subdirs)
+                    else:
+                        self.console.print("[red]Failed to create store[/red]")
 
-            elif answer['action'] == "select":
-                stores = self.chroma_manager.list_stores()
-                if not stores:
-                    self.console.print("[yellow]No stores available[/yellow]")
-                    continue
-
+            elif answer['action'] == "select" and stores:
                 store_choices = [
                     ("None (Disable Store)", "none"),  # Add None option at the top
                 ]
@@ -832,24 +938,10 @@ class AIChatApp:
                         self.chroma_manager.unload_store()
                     elif store_answer['store']:
                         if self.chroma_manager.load_store(store_answer['store']):
-                            if inquirer.confirm("Would you like to process a directory now?", default=False):
-                                dir_question = [
-                                    inquirer.Text('directory',
-                                        message="Enter directory path to process",
-                                        default="."
-                                    )
-                                ]
-                                dir_answer = inquirer.prompt(dir_question)
-                                if dir_answer:
-                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                            if inquirer.confirm("Would you like to refresh the store to check for new files?", default=False):
+                                self.chroma_manager.refresh_store()
 
-            elif answer['action'] == "delete":
-                stores = self.chroma_manager.list_stores()
-                if not stores:
-                    self.console.print("[yellow]No stores available[/yellow]")
-                    continue
-
+            elif answer['action'] == "delete" and stores:
                 store_choices = [(store, store) for store in stores]
                 store_choices.append(("Back", None))
 
@@ -870,22 +962,8 @@ class AIChatApp:
                     if confirm:
                         if self.chroma_manager.delete_store(store_answer['store']):
                             self.console.print(f"[green]Deleted store: {store_answer['store']}[/green]")
-
-            elif answer['action'] == "process":
-                if not self.chroma_manager.store_name:
-                    self.console.print("[yellow]Please select a store first[/yellow]")
-                    continue
-
-                dir_question = [
-                    inquirer.Text('directory',
-                        message="Enter directory path to process",
-                        default="."
-                    )
-                ]
-                dir_answer = inquirer.prompt(dir_question)
-                if dir_answer:
-                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                        else:
+                            self.console.print("[red]Failed to delete store[/red]")
 
             elif answer['action'] == "test":
                 query = inquirer.text(message="Enter a test query")
@@ -905,7 +983,216 @@ class AIChatApp:
                     self.console.input("\nPress Enter to continue...")
 
             elif answer['action'] == "model":
+                if not self.chroma_manager:
+                    self.chroma_manager = ChromaManager(self.logger, self.console)
                 self.chroma_manager.select_embedding_model()
+
+    def manage_store(self):
+        """Manage current store contents and operations"""
+        if not self.chroma_manager or not self.chroma_manager.store_name:
+            self.console.print("[yellow]Please select a store first[/yellow]")
+            return
+
+        while True:
+            # Get current store info
+            store_name = self.chroma_manager.store_name
+            doc_count = self.chroma_manager.vectorstore._collection.count() if self.chroma_manager.vectorstore else 0
+
+            choices = [
+                ("═══ Store Information ═══", None),
+                (f"Current Store: {store_name}", None),
+                (f"Document Count: {doc_count}", None),
+                ("═══ Content Management ═══", None),
+                ("View Store Contents", "view"),
+                ("Add Files", "add_files"),
+                ("Add Directory", "add_directory"),
+                ("Refresh Store", "refresh"),
+                ("═══ Document Management ═══", None),
+                ("List All Documents", "list_docs"),
+                ("Delete Documents", "delete_docs"),
+                ("Update Document", "update_doc"),
+                ("Clear All Documents", "clear_store"),
+                ("═══ Navigation ═══", None),
+                ("Back", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage Store",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "view":
+                # Show store contents with search
+                query = inquirer.text(message="Enter search query (or press Enter to see all)")
+                if query is not None:  # Allow empty query
+                    self.console.print("\n[cyan]Searching store contents...[/cyan]")
+                    results = self.chroma_manager.search_context(query if query else "", k=50)
+                    if results:
+                        self.console.print("\n[green]Store contents:[/green]")
+                        for i, result in enumerate(results, 1):
+                            self.console.print(Panel(
+                                result,
+                                title=f"[bold cyan]Result {i}[/bold cyan]",
+                                border_style="cyan"
+                            ))
+                    else:
+                        self.console.print("[yellow]No matching documents found[/yellow]")
+                    self.console.input("\nPress Enter to continue...")
+
+            elif answer['action'] == "list_docs":
+                documents = self.chroma_manager.get_all_documents()
+                if documents:
+                    self.console.print("\n[green]All Documents in Store:[/green]")
+                    for doc in documents:
+                        self.console.print(Panel(
+                            f"[bold white]ID:[/bold white] {doc['id']}\n\n"
+                            f"[bold white]Content:[/bold white]\n{doc['content']}\n\n"
+                            f"[bold white]Metadata:[/bold white]\n{json.dumps(doc['metadata'], indent=2)}",
+                            title=f"[bold cyan]Document[/bold cyan]",
+                            border_style="cyan"
+                        ))
+                    self.console.input("\nPress Enter to continue...")
+                else:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+
+            elif answer['action'] == "delete_docs":
+                documents = self.chroma_manager.get_all_documents()
+                if not documents:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+                    continue
+
+                # Create choices for documents
+                doc_choices = []
+                for doc in documents:
+                    # Get first line or truncate content for display
+                    content_preview = doc['content'].split('\n')[0][:100] + "..."
+                    doc_choices.append((
+                        f"ID: {doc['id']} - {content_preview}",
+                        doc['id']
+                    ))
+                doc_choices.append(("Back", None))
+
+                # Allow multiple selection
+                doc_question = [
+                    inquirer.Checkbox('docs',
+                        message="Select documents to delete (space to select, enter to confirm)",
+                        choices=doc_choices[:-1]  # Exclude "Back" option
+                    )
+                ]
+
+                doc_answer = inquirer.prompt(doc_question)
+                if doc_answer and doc_answer['docs']:
+                    if inquirer.confirm("Are you sure you want to delete these documents?", default=False):
+                        self.chroma_manager.delete_documents(doc_answer['docs'])
+
+            elif answer['action'] == "update_doc":
+                documents = self.chroma_manager.get_all_documents()
+                if not documents:
+                    self.console.print("[yellow]No documents found in store[/yellow]")
+                    continue
+
+                # Create choices for documents
+                doc_choices = []
+                for doc in documents:
+                    # Get first line or truncate content for display
+                    content_preview = doc['content'].split('\n')[0][:100] + "..."
+                    doc_choices.append((
+                        f"ID: {doc['id']} - {content_preview}",
+                        doc
+                    ))
+                doc_choices.append(("Back", None))
+
+                # Select document to update
+                doc_question = [
+                    inquirer.List('doc',
+                        message="Select document to update",
+                        choices=doc_choices,
+                        carousel=True
+                    )
+                ]
+
+                doc_answer = inquirer.prompt(doc_question)
+                if doc_answer and doc_answer['doc']:
+                    doc = doc_answer['doc']
+                    self.console.print(Panel(
+                        doc['content'],
+                        title=f"[bold cyan]Current Content - ID: {doc['id']}[/bold cyan]",
+                        border_style="cyan"
+                    ))
+                    
+                    self.console.print(
+                        "\n[bold cyan]Enter new content below:[/bold cyan]\n"
+                        "• You can paste multiple lines of text\n"
+                        "• Press [bold]Enter[/bold] twice to start a new line\n"
+                        "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                        "• Type [bold]CANCEL[/bold] on a new line to cancel"
+                    )
+                    
+                    content_lines = []
+                    try:
+                        while True:
+                            line = input()
+                            if line.strip().upper() == 'END':
+                                break
+                            if line.strip().upper() == 'CANCEL':
+                                content_lines = []
+                                break
+                            content_lines.append(line)
+                    except KeyboardInterrupt:
+                        self.console.print("\n[yellow]Update cancelled[/yellow]")
+                        continue
+
+                    if content_lines:
+                        new_content = '\n'.join(content_lines)
+                        if inquirer.confirm("Update this document?", default=True):
+                            self.chroma_manager.update_document(doc['id'], new_content)
+
+            elif answer['action'] == "clear_store":
+                if inquirer.confirm(
+                    "Are you sure you want to remove ALL documents from the store?",
+                    default=False
+                ):
+                    self.chroma_manager.clear_store()
+
+            elif answer['action'] == "add_files":
+                files_question = [
+                    inquirer.Text('files',
+                        message="Enter file paths (comma-separated)",
+                    )
+                ]
+                files_answer = inquirer.prompt(files_question)
+                if files_answer:
+                    files = [f.strip() for f in files_answer['files'].split(',')]
+                    self.chroma_manager.refresh_store(files=files)
+
+            elif answer['action'] == "add_directory":
+                dir_question = [
+                    inquirer.Text('directory',
+                        message="Enter directory path to process",
+                        default="."
+                    ),
+                    inquirer.Confirm('include_subdirs',
+                        message="Include subdirectories?",
+                        default=True
+                    )
+                ]
+                dir_answer = inquirer.prompt(dir_question)
+                if dir_answer:
+                    self.chroma_manager.process_directory(
+                        dir_answer['directory'],
+                        include_subdirs=dir_answer['include_subdirs']
+                    )
+
+            elif answer['action'] == "refresh":
+                if inquirer.confirm("Are you sure you want to refresh the store? This will reprocess all files.", default=True):
+                    self.chroma_manager.refresh_store()
 
     def manage_model_contexts(self):
         """Display and manage context window settings for models"""
@@ -1007,7 +1294,6 @@ class AIChatApp:
                 choices.extend([
                     ("Select Store", "select"),
                     ("Delete Store", "delete"),
-                    ("Process Directory", "process"),
                 ])
 
             if current_store:
@@ -1047,15 +1333,21 @@ class AIChatApp:
                     if self.chroma_manager.create_store(name_answer['name']):
                         # Ask if user wants to process a directory
                         if inquirer.confirm("Would you like to process a directory now?", default=True):
-                            dir_question = [
+                            dir_questions = [
                                 inquirer.Text('directory',
                                     message="Enter directory path to process",
-                                    default="."
-                                )
+                                    validate=lambda _, x: os.path.exists(x.strip('"\''))
+                                ),
+                                inquirer.Confirm('include_subdirs',
+                                    message="Include subdirectories?",
+                                    default=True
+                                ),
                             ]
-                            dir_answer = inquirer.prompt(dir_question)
+                            dir_answer = inquirer.prompt(dir_questions)
                             if dir_answer:
-                                self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=True)
+                                directory_path = dir_answer['directory'].strip('"\'')
+                                include_subdirs = dir_answer['include_subdirs']
+                                self.chroma_manager.process_directory(directory_path, include_subdirs=include_subdirs)
                     else:
                         self.console.print("[red]Failed to create store[/red]")
 
@@ -1080,17 +1372,8 @@ class AIChatApp:
                         self.chroma_manager.unload_store()
                     elif store_answer['store']:
                         if self.chroma_manager.load_store(store_answer['store']):
-                            if inquirer.confirm("Would you like to process a directory now?", default=False):
-                                dir_question = [
-                                    inquirer.Text('directory',
-                                        message="Enter directory path to process",
-                                        default="."
-                                    )
-                                ]
-                                dir_answer = inquirer.prompt(dir_question)
-                                if dir_answer:
-                                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
+                            if inquirer.confirm("Would you like to refresh the store to check for new files?", default=False):
+                                self.chroma_manager.refresh_store()
 
             elif answer['action'] == "delete" and stores:
                 store_choices = [(store, store) for store in stores]
@@ -1116,36 +1399,9 @@ class AIChatApp:
                         else:
                             self.console.print("[red]Failed to delete store[/red]")
 
-            elif answer['action'] == "process" and current_store:
-                dir_question = [
-                    inquirer.Text('directory',
-                        message="Enter directory path to process",
-                        default="."
-                    )
-                ]
-                dir_answer = inquirer.prompt(dir_question)
-                if dir_answer:
-                    force_refresh = inquirer.confirm("Force refresh existing embeddings?", default=False)
-                    self.chroma_manager.process_directory(dir_answer['directory'], force_refresh=force_refresh)
-
-            elif answer['action'] == "test" and current_store:
-                query = inquirer.text(message="Enter a test query")
-                if query:
-                    self.console.print("\n[cyan]Searching for relevant context...[/cyan]")
-                    results = self.chroma_manager.search_context(query)
-                    if results:
-                        self.console.print("\n[green]Found relevant files:[/green]")
-                        for i, result in enumerate(results, 1):
-                            self.console.print(Panel(
-                                result,
-                                title=f"[bold cyan]Result {i}[/bold cyan]",
-                                border_style="cyan"
-                            ))
-                    else:
-                        self.console.print("[yellow]No relevant context found[/yellow]")
-                    self.console.input("\nPress Enter to continue...")
-
             elif answer['action'] == "model":
+                if not self.chroma_manager:
+                    self.chroma_manager = ChromaManager(self.logger, self.console)
                 self.chroma_manager.select_embedding_model()
 
     def display_main_menu(self):
@@ -1154,6 +1410,9 @@ class AIChatApp:
         
         while True:
             try:
+                # Reload favorites
+                self.reload_favorites()
+                
                 # Check API availability first
                 openai_available = bool(os.getenv('OPENAI_API_KEY'))
                 openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
@@ -1349,6 +1608,23 @@ class AIChatApp:
     
     def _handle_model_selection(self, selected_model):
         """Handle the model selection and subsequent actions"""
+        # Check if model is in favorites
+        is_favorite = any(f['id'] == selected_model['id'] for f in self.favorites)
+        icon = "★" if is_favorite else "○"
+        
+        # Display model description in a panel with enhanced styling
+        self.console.print()  # Add spacing
+        self.console.print(Panel(
+            f"[bold white]Provider:[/bold white] [cyan]{selected_model.get('provider', 'unknown').upper()}[/cyan]\n\n"
+            f"[bold white]Description:[/bold white]\n[cyan]{selected_model.get('description', 'No description available')}[/cyan]",
+            title=f"[bold cyan]{icon} {selected_model['name']}[/bold cyan]",
+            title_align="left",
+            border_style="bright_blue",
+            padding=(1, 2),
+            highlight=True
+        ))
+        self.console.print()  # Add spacing
+        
         action_choices = [
             ("Start Chat", "chat"),
             ("Add to Favorites", "favorite"),
@@ -1377,6 +1653,11 @@ class AIChatApp:
         try:
             system_instruction = self.instructions_manager.get_selected_instruction()
             
+            # Record model and instruction usage
+            self.stats_manager.record_model_usage(model_config)
+            if system_instruction:
+                self.stats_manager.record_instruction_usage(system_instruction['name'])
+            
             # Enable file context for all providers when agent is enabled
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
@@ -1392,7 +1673,8 @@ class AIChatApp:
                 self.console,
                 system_instruction,
                 self.settings_manager,
-                chroma_manager=self.chroma_manager if enable_file_context else None
+                chroma_manager=self.chroma_manager if enable_file_context else None,
+                stats_manager=self.stats_manager  # Pass stats_manager to AIChat
             )
             chat.chat_loop()
             return True
@@ -1413,16 +1695,83 @@ class AIChatApp:
                         settings['agent'] = {
                             'enabled': False
                         }
-                        self._save_settings(settings)
+                    
+                    # Ensure streaming settings exist with defaults
+                    if 'streaming' not in settings:
+                        settings['streaming'] = {
+                            'enabled': False
+                        }
+                    
+                    # Ensure tools settings exist with defaults
+                    if 'tools' not in settings:
+                        settings['tools'] = {
+                            'enabled': False,
+                            'available_tools': {
+                                'search': {
+                                    'enabled': True,
+                                    'description': 'Search the web for information'
+                                },
+                                'calculate': {
+                                    'enabled': True,
+                                    'description': 'Perform mathematical calculations'
+                                },
+                                'time': {
+                                    'enabled': True,
+                                    'description': 'Get current time and date information'
+                                },
+                                'weather': {
+                                    'enabled': True,
+                                    'description': 'Get weather information'
+                                },
+                                'system': {
+                                    'enabled': True,
+                                    'description': 'Access system information and perform OS operations'
+                                }
+                            }
+                        }
+                        
+                    self._save_settings(settings)
                     return settings
             return {
                 'agent': {
                     'enabled': False
+                },
+                'streaming': {
+                    'enabled': False
+                },
+                'tools': {
+                    'enabled': False,
+                    'available_tools': {
+                        'search': {
+                            'enabled': True,
+                            'description': 'Search the web for information'
+                        },
+                        'calculate': {
+                            'enabled': True,
+                            'description': 'Perform mathematical calculations'
+                        },
+                        'time': {
+                            'enabled': True,
+                            'description': 'Get current time and date information'
+                        },
+                        'weather': {
+                            'enabled': True,
+                            'description': 'Get weather information'
+                        },
+                        'system': {
+                            'enabled': True,
+                            'description': 'Access system information and perform OS operations'
+                        }
+                    }
                 }
             }
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
-            return {'agent': {'enabled': False}}
+            return {
+                'agent': {'enabled': False},
+                'streaming': {'enabled': False},
+                'tools': {'enabled': False}
+            }
 
     def _save_settings(self, settings: Dict) -> None:
         """Save settings to file"""
@@ -1449,6 +1798,34 @@ class AIChatApp:
             return "🟡 Enabled (No Store Selected)"
         else:
             return "⭕ Disabled"
+
+    def manage_statistics(self):
+        """Display ACT statistics"""
+        while True:
+            # Get formatted statistics table
+            stats_table = self.stats_manager.format_stats_display()
+            
+            # Display the statistics
+            self.console.print()  # Add some spacing
+            self.console.print(stats_table)
+            self.console.print()  # Add some spacing
+
+            # Navigation options
+            choices = [
+                ("Back", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Select action",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
 
 def main():
     """Main application entry point"""

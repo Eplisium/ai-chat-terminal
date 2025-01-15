@@ -83,12 +83,14 @@ class OpenRouterAPI:
         return dict(company_models)
 
 class AIChat:
-    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None):
+    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None, stats_manager=None):
         """Initialize AI Chat with specific model configuration"""
         self.logger = logger
         self.console = console
         self.settings_manager = settings_manager
         self.chroma_manager = chroma_manager
+        self.stats_manager = stats_manager
+        self.session_id = None  # Track current session ID
         dotenv.load_dotenv()
 
         self.model_id = model_config['id']
@@ -96,6 +98,22 @@ class AIChat:
         self.provider = model_config.get('provider', 'openai')
         self.max_tokens = model_config.get('max_tokens')
         self.start_time = datetime.now()
+        self.last_save_path = None  # Track last save location
+        self.last_save_name = None  # Track last used custom name
+        
+        # Get streaming and tools settings
+        self.streaming_enabled = False
+        self.tools_enabled = False
+        self.available_tools = {}
+        if self.settings_manager:
+            settings = self.settings_manager._load_settings()
+            self.streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+            self.tools_enabled = settings.get('tools', {}).get('enabled', False)
+            if self.tools_enabled:
+                self.available_tools = {
+                    name: info for name, info in settings.get('tools', {}).get('available_tools', {}).items()
+                    if info.get('enabled', True)
+                }
         
         # Handle system instruction name and content
         if isinstance(system_instruction, dict):
@@ -240,7 +258,7 @@ class AIChat:
             return False, f"Error processing directory: {str(e)}"
 
     def send_message(self, user_input):
-        """Send a message to the AI and get a response"""
+        """Send a message to the AI model and get the response"""
         try:
             # Process file context if available
             if self.chroma_manager and self.chroma_manager.vectorstore:
@@ -258,153 +276,83 @@ class AIChat:
 
             # Add user message
             current_message = {"role": "user", "content": user_input}
-            
-            # Process code blocks and file/directory references
-            if "```" in user_input or "[[" in user_input:
-                content = []
-                remaining_text = user_input
-                
-                # Extract code blocks
-                while "```" in remaining_text:
-                    start = remaining_text.find("```")
-                    if start == -1:
-                        break
-                    
-                    # Add text before code block
-                    if start > 0:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[:start].strip()
-                        })
-                    
-                    # Find the end of the code block
-                    end = remaining_text.find("```", start + 3)
-                    if end == -1:
-                        # No closing backticks, treat rest as text
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:].strip()
-                        })
-                        break
-                    
-                    # Extract language (if specified) and code
-                    code_block = remaining_text[start+3:end]
-                    language = ""
-                    if "\n" in code_block:
-                        first_line = code_block[:code_block.find("\n")].strip()
-                        if first_line and not first_line.startswith(" "):
-                            language = first_line
-                            code_block = code_block[code_block.find("\n")+1:]
-                    
-                    content.append({
-                        "type": "code",
-                        "language": language,
-                        "code": code_block.strip()
-                    })
-                    
-                    remaining_text = remaining_text[end+3:]
-                
-                # Process remaining text for file/directory references
-                while "[[" in remaining_text:
-                    start = remaining_text.find("[[")
-                    if start == -1:
-                        break
-                    
-                    # Add text before reference
-                    if start > 0:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[:start].strip()
-                        })
-                    
-                    # Find the end of the reference
-                    end = remaining_text.find("]]", start)
-                    if end == -1:
-                        # No closing brackets, treat rest as text
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:].strip()
-                        })
-                        break
-                    
-                    # Extract reference type and path
-                    ref = remaining_text[start+2:end].strip()
-                    if ":" in ref:
-                        ref_type, ref_path = ref.split(":", 1)
-                        ref_path = ref_path.strip('"').strip("'").strip()
-                        
-                        # Process image references
-                        if ref_type == "img":
-                            success, result = encode_image_to_base64(ref_path)
-                            if success:
-                                mime_type = get_image_mime_type(ref_path)
-                                content.append({
-                                    "type": "image",
-                                    "image_url": f"data:{mime_type};base64,{result}"
-                                })
-                            else:
-                                content.append({
-                                    "type": "text",
-                                    "text": f"Error processing image: {result}"
-                                })
-                        # Add file content to ChromaDB if available
-                        elif ref_type == "file" and self.chroma_manager and self.chroma_manager.vectorstore:
-                            try:
-                                with open(ref_path, 'r', encoding='utf-8') as f:
-                                    file_content = f.read()
-                                    self.chroma_manager.add_file_to_store(ref_path, file_content)
-                            except Exception as e:
-                                self.logger.error(f"Error adding file to store: {e}")
-                        
-                        # Process file and directory references
-                        if ref_type == "file":
-                            success, result = self._process_file_reference(f"[[file:{ref_path}]]")
-                            content.append({
-                                "type": "text",
-                                "text": result
-                            })
-                        elif ref_type == "dir":
-                            success, result = self._process_directory_reference(f"[[dir:{ref_path}]]")
-                            content.append({
-                                "type": "text",
-                                "text": result
-                            })
-                        else:
-                            content.append({
-                                "type": "reference",
-                                "ref_type": ref_type,
-                                "path": ref_path
-                            })
-                    else:
-                        content.append({
-                            "type": "text",
-                            "text": remaining_text[start:end+2].strip()
-                        })
-                    
-                    remaining_text = remaining_text[end+2:]
-                
-                if remaining_text.strip():
-                    content.append({
-                        "type": "text",
-                        "text": remaining_text.strip()
-                    })
-                
-                current_message["content"] = content
-
             messages.append(current_message)
             self.messages.append(current_message)
             
-            thinking_message = self.console.status(f"[bold yellow]{self.model_name} is thinking...[/bold yellow]")
+            # Initialize tool results
+            self.last_tool_results = []
+            
+            # Check if the message is a command
+            if isinstance(user_input, str):
+                user_input_lower = user_input.strip().lower()
+                if user_input_lower in ['bye', 'exit', 'quit', 'cya', 'adios', '/end', '/info', '/help', '/clear', '/save', '/insert']:
+                    return None
+            
+            # Record sent message only when we're about to make the API call
+            if self.stats_manager:
+                self.stats_manager.record_chat(self.model_id, "sent")
+            
+            start_time = time.time()
+            thinking_message = self.console.status("")
             thinking_message.start()
             
+            # Use a threading Event to control the timer
+            stop_timer = threading.Event()
+            
+            def update_thinking_message():
+                while not stop_timer.is_set():
+                    elapsed = time.time() - start_time
+                    minutes = int(elapsed // 60)
+                    seconds = elapsed % 60
+                    time_display = f"{seconds:.2f} secs"
+                    if minutes > 0:
+                        time_display = f"{minutes} min {seconds:.2f} secs"
+                    thinking_message.update(
+                        f"[bold yellow]{self.model_name} is thinking... ({time_display})[/bold yellow]"
+                    )
+                    time.sleep(0.1)  # Update every 100ms
+            
+            # Start the timer in a separate thread
+            timer_thread = threading.Thread(target=update_thinking_message)
+            timer_thread.daemon = True
+            timer_thread.start()
+
+            # Variables for streaming response
+            partial_response = ""
+            interrupted = False
+            original_handler = signal.getsignal(signal.SIGINT)
+
+            def signal_handler(signum, frame):
+                nonlocal interrupted
+                interrupted = True
+                # Restore original handler for next Ctrl+C
+                signal.signal(signal.SIGINT, original_handler)
+            
             try:
+                # Set up Ctrl+C handler if streaming is enabled
+                if self.streaming_enabled:
+                    signal.signal(signal.SIGINT, signal_handler)
+                
                 if self.provider == 'anthropic':
                     anthropic_messages = []
                     for msg in messages[1:]:
                         if isinstance(msg["content"], list):
+                            content_parts = []
+                            for part in msg["content"]:
+                                if part["type"] == "text":
+                                    content_parts.append({"type": "text", "text": part["text"]})
+                                elif part["type"] == "image_url":
+                                    content_parts.append({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": part["image_url"]["url"].split(";")[0].split(":")[1],
+                                            "data": part["image_url"]["url"].split(",")[1]
+                                        }
+                                    })
                             anthropic_messages.append({
                                 "role": "user" if msg["role"] == "user" else "assistant",
-                                "content": msg["content"]
+                                "content": content_parts
                             })
                         else:
                             anthropic_messages.append({
@@ -416,65 +364,309 @@ class AIChat:
                         "model": self.model_id,
                         "messages": anthropic_messages,
                         "system": self.messages[0]['content'],
-                        "temperature": 0.7
+                        "temperature": 0.7,
+                        "max_tokens": self.max_tokens if self.max_tokens else 4096,
+                        "stream": self.streaming_enabled
                     }
                     
-                    # Add max_tokens only if configured
-                    if self.max_tokens:
-                        request_data["max_tokens"] = self.max_tokens
-
-                    response = self.client.messages.create(**request_data)
-                    log_api_response("Anthropic", request_data, response)
-                    ai_response = response.content[0].text
+                    if self.streaming_enabled:
+                        response = self.client.messages.create(**request_data)
+                        for chunk in response:
+                            if interrupted:
+                                break
+                            if chunk.type == "content_block_delta":
+                                partial_response += chunk.delta.text or ""
+                        
+                        # Get token usage with a separate non-streaming request
+                        if not interrupted:
+                            request_data["stream"] = False
+                            final_response = self.client.messages.create(**request_data)
+                            log_api_response("Anthropic", request_data, final_response)
+                            
+                            if hasattr(final_response, 'usage'):
+                                self.last_tokens_prompt = final_response.usage.input_tokens
+                                self.last_tokens_completion = final_response.usage.output_tokens
+                                self.last_total_cost = self._calculate_anthropic_cost(
+                                    self.last_tokens_prompt,
+                                    self.last_tokens_completion,
+                                    self.model_id
+                                )
+                                
+                                msg_index = len(self.messages) - 1
+                                setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                                setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                                setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                    else:
+                        # Non-streaming mode
+                        response = self.client.messages.create(**request_data)
+                        log_api_response("Anthropic", request_data, response)
+                        partial_response = response.content[0].text
+                        
+                        if hasattr(response, 'usage'):
+                            self.last_tokens_prompt = response.usage.input_tokens
+                            self.last_tokens_completion = response.usage.output_tokens
+                            self.last_total_cost = self._calculate_anthropic_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
+                            
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
 
                 elif self.provider == 'openrouter':
-                    # Format messages for OpenRouter API
                     formatted_messages = []
                     for msg in messages:
                         if isinstance(msg["content"], list):
-                            # Handle messages with mixed content (text, images, etc.)
                             content_parts = []
                             for part in msg["content"]:
                                 if part["type"] == "text":
                                     content_parts.append({"type": "text", "text": part["text"]})
-                                elif part["type"] == "image":
-                                    content_parts.append({"type": "image_url", "image_url": part["image_url"]})
+                                elif part["type"] == "image_url":
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": part["image_url"]["url"]
+                                    })
                             formatted_messages.append({"role": msg["role"], "content": content_parts})
                         else:
-                            # Handle simple text messages
                             formatted_messages.append({"role": msg["role"], "content": msg["content"]})
 
                     request_data = {
                         "model": self.model_id,
                         "messages": formatted_messages,
                         "temperature": 0.7,
-                        "stream": False
+                        "stream": self.streaming_enabled
                     }
 
-                    response = requests.post(
-                        f"{self.api_base}/chat/completions",
-                        headers=get_openrouter_headers(self.api_key),
-                        json=request_data
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    log_api_response("OpenRouter", request_data, data)
-                    
-                    # Handle response based on whether it's a chat completion or image analysis
-                    if "choices" in data:
-                        ai_response = data['choices'][0]['message']['content'].strip()
-                    else:
-                        # Handle case where response doesn't have choices (e.g., image analysis)
-                        ai_response = data.get('content', "No response content available").strip()
-                    
-                    # Get the generation ID from the response
-                    generation_id = data.get('id')
-                    if generation_id:
-                        # Add a small delay to ensure cost data is available
-                        time.sleep(0.5)
+                    # Add tools if enabled and available
+                    if self.tools_enabled and self.available_tools:
+                        tools = []
+                        if 'search' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "description": "Search the web for information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "query": {
+                                                "type": "string",
+                                                "description": "The search query"
+                                            }
+                                        },
+                                        "required": ["query"]
+                                    }
+                                }
+                            })
+                        if 'calculate' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "calculate",
+                                    "description": "Perform mathematical calculations",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "expression": {
+                                                "type": "string",
+                                                "description": "The mathematical expression to evaluate"
+                                            }
+                                        },
+                                        "required": ["expression"]
+                                    }
+                                }
+                            })
+                        if 'time' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "get_time",
+                                    "description": "Get current time and date information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "timezone": {
+                                                "type": "string",
+                                                "description": "Optional timezone (e.g., 'UTC', 'America/New_York')"
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        if 'weather' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "description": "Get weather information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "location": {
+                                                "type": "string",
+                                                "description": "Location to get weather for"
+                                            }
+                                        },
+                                        "required": ["location"]
+                                    }
+                                }
+                            })
+                        if 'system' in self.available_tools:
+                            tools.append({
+                                "type": "function",
+                                "function": {
+                                    "name": "system_info",
+                                    "description": "Get system information",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "info_type": {
+                                                "type": "string",
+                                                "description": "Type of system information to retrieve (e.g., 'os', 'cpu', 'memory')",
+                                                "enum": ["os", "cpu", "memory", "disk"]
+                                            }
+                                        },
+                                        "required": ["info_type"]
+                                    }
+                                }
+                            })
                         
-                        # Try multiple times to get the cost data
+                        if tools:
+                            request_data["tools"] = tools
+                            request_data["tool_choice"] = "auto"
+
+                    data = None  # Initialize data variable
+                    if self.streaming_enabled:
+                        response = requests.post(
+                            f"{self.api_base}/chat/completions",
+                            headers=get_openrouter_headers(self.api_key),
+                            json=request_data,
+                            stream=True
+                        )
+                        response.raise_for_status()
+                        
+                        for line in response.iter_lines():
+                            if interrupted:
+                                break
+                            if line:
+                                line = line.decode('utf-8')
+                                if line.startswith('data: '):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
+                                            partial_response += chunk['choices'][0]['delta']['content']
+                                        elif chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('tool_calls'):
+                                            # Handle tool calls in streaming mode
+                                            tool_call = chunk['choices'][0]['delta']['tool_calls'][0]
+                                            if 'function' in tool_call:
+                                                # Add the assistant's initial message and tool call
+                                                initial_content = chunk['choices'][0]['delta'].get('content')
+                                                assistant_message = {
+                                                    "role": "assistant",
+                                                    "content": initial_content,
+                                                    "tool_calls": [tool_call]
+                                                }
+                                                messages.append(assistant_message)
+                                                
+                                                # Execute tool call and get result
+                                                result = self._execute_tool_call(tool_call)
+                                                
+                                                # Add tool result as a message
+                                                messages.append({
+                                                    "role": "tool",
+                                                    "name": tool_call['function']['name'],
+                                                    "tool_call_id": tool_call.get('id', ''),
+                                                    "content": result
+                                                })
+                                                
+                                                # Make a new request to get the AI's natural response
+                                                request_data["messages"] = messages
+                                                request_data["stream"] = False
+                                                request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                                                request_data.pop("tool_choice", None)
+                                                
+                                                response = requests.post(
+                                                    f"{self.api_base}/chat/completions",
+                                                    headers=get_openrouter_headers(self.api_key),
+                                                    json=request_data
+                                                )
+                                                response.raise_for_status()
+                                                data = response.json()
+                                                
+                                                if 'choices' in data and len(data['choices']) > 0:
+                                                    partial_response = data['choices'][0]['message']['content'].strip()
+                                                else:
+                                                    partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + result
+                                    except json.JSONDecodeError:
+                                        continue
+                    else:
+                        # Non-streaming mode
+                        response = requests.post(
+                            f"{self.api_base}/chat/completions",
+                            headers=get_openrouter_headers(self.api_key),
+                            json=request_data
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        log_api_response("OpenRouter", request_data, data)
+                        
+                        # Handle tool calls in non-streaming mode
+                        if data['choices'][0].get('message', {}).get('tool_calls'):
+                            tool_results = []
+                            tool_messages = []
+                            
+                            # First, add the assistant's initial message and tool call
+                            initial_content = data['choices'][0]['message'].get('content')
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": initial_content,
+                                "tool_calls": data['choices'][0]['message']['tool_calls']
+                            }
+                            messages.append(assistant_message)
+                            
+                            # Execute tool calls and collect results
+                            for tool_call in data['choices'][0]['message']['tool_calls']:
+                                result = self._execute_tool_call(tool_call)
+                                tool_results.append(result)
+                                
+                                # Add tool result as a message
+                                tool_messages.append({
+                                    "role": "tool",
+                                    "name": tool_call['function']['name'],
+                                    "tool_call_id": tool_call.get('id', ''),
+                                    "content": result
+                                })
+                            
+                            # Add all tool results to the conversation
+                            messages.extend(tool_messages)
+                            
+                            # Make a second request to get the AI's natural response
+                            request_data["messages"] = messages
+                            request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                            request_data.pop("tool_choice", None)
+                            
+                            response = requests.post(
+                                f"{self.api_base}/chat/completions",
+                                headers=get_openrouter_headers(self.api_key),
+                                json=request_data
+                            )
+                            response.raise_for_status()
+                            data = response.json()
+                            
+                            if 'choices' in data and len(data['choices']) > 0:
+                                partial_response = data['choices'][0]['message']['content'].strip()
+                            else:
+                                partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + " ".join(tool_results)
+                        else:
+                            partial_response = data['choices'][0]['message']['content'].strip()
+
+                    # Get token usage with a separate request
+                    if data and data.get('id'):
+                        generation_id = data['id']
+                        time.sleep(0.5)
                         max_retries = 3
                         retry_delay = 0.5
                         
@@ -484,18 +676,15 @@ class AIChat:
                                     f"{self.api_base}/generation?id={generation_id}",
                                     headers=get_openrouter_headers(self.api_key)
                                 )
-                                generation_response.raise_for_status()
                                 generation_data = generation_response.json()
                                 
                                 if 'data' in generation_data and generation_data['data'].get('total_cost') is not None:
-                                    # Store the accurate cost information
                                     self.last_total_cost = generation_data['data']['total_cost']
                                     self.last_tokens_prompt = generation_data['data'].get('tokens_prompt', 0)
                                     self.last_tokens_completion = generation_data['data'].get('tokens_completion', 0)
                                     self.last_native_tokens_prompt = generation_data['data'].get('native_tokens_prompt', 0)
                                     self.last_native_tokens_completion = generation_data['data'].get('native_tokens_completion', 0)
                                     
-                                    # Store per-message stats
                                     msg_index = len(self.messages) - 1
                                     setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
                                     setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
@@ -503,56 +692,116 @@ class AIChat:
                                     setattr(self, f'last_native_tokens_prompt_{msg_index}', self.last_native_tokens_prompt)
                                     setattr(self, f'last_native_tokens_completion_{msg_index}', self.last_native_tokens_completion)
                                     break
-                                else:
-                                    if attempt < max_retries - 1:
-                                        time.sleep(retry_delay)
-                                        continue
-                                    else:
-                                        # If we still don't have cost data, try to calculate from usage
-                                        if 'usage' in data:
-                                            usage = data['usage']
-                                            self.last_tokens_prompt = usage.get('prompt_tokens', 0)
-                                            self.last_tokens_completion = usage.get('completion_tokens', 0)
-                                            self.last_total_cost = 0  # We don't have accurate cost data
-                            except Exception as e:
-                                self.logger.error(f"Error fetching generation stats (attempt {attempt + 1}): {e}")
+                            except Exception:
                                 if attempt < max_retries - 1:
                                     time.sleep(retry_delay)
                                     continue
-                                else:
-                                    self.last_total_cost = 0
-                                    if 'usage' in data:
-                                        usage = data['usage']
-                                        self.last_tokens_prompt = usage.get('prompt_tokens', 0)
-                                        self.last_tokens_completion = usage.get('completion_tokens', 0)
 
                 else:  # OpenAI
                     request_data = {
                         "model": self.model_id,
                         "messages": messages,
                         "temperature": 0.7,
-                        "stream": False
+                        "stream": self.streaming_enabled
                     }
                     
-                    # Add max_tokens only if configured
                     if self.max_tokens:
                         request_data["max_tokens"] = self.max_tokens
 
-                    response = self.client.chat.completions.create(**request_data)
-                    log_api_response("OpenAI", request_data, response)
-                    ai_response = response.choices[0].message.content.strip()
+                    if self.streaming_enabled:
+                        response = self.client.chat.completions.create(**request_data)
+                        for chunk in response:
+                            if interrupted:
+                                break
+                            if chunk.choices[0].delta.content is not None:
+                                partial_response += chunk.choices[0].delta.content
 
-            except Exception as e:
-                log_api_response(self.provider, request_data, None, error=e)
-                raise
+                        # Get token usage with a separate non-streaming request
+                        if not interrupted:
+                            request_data["stream"] = False
+                            final_response = self.client.chat.completions.create(**request_data)
+                            log_api_response("OpenAI", request_data, final_response)
+                            
+                            if hasattr(final_response, 'usage'):
+                                self.last_tokens_prompt = final_response.usage.prompt_tokens
+                                self.last_tokens_completion = final_response.usage.completion_tokens
+                                self.last_total_cost = self._calculate_openai_cost(
+                                    self.last_tokens_prompt,
+                                    self.last_tokens_completion,
+                                    self.model_id
+                                )
+                                
+                                msg_index = len(self.messages) - 1
+                                setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                                setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                                setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                    else:
+                        # Non-streaming mode
+                        response = self.client.chat.completions.create(**request_data)
+                        log_api_response("OpenAI", request_data, response)
+                        partial_response = response.choices[0].message.content.strip()
+                        
+                        if hasattr(response, 'usage'):
+                            self.last_tokens_prompt = response.usage.prompt_tokens
+                            self.last_tokens_completion = response.usage.completion_tokens
+                            self.last_total_cost = self._calculate_openai_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
+                            
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+
             finally:
+                # Restore original signal handler if streaming was enabled
+                if self.streaming_enabled:
+                    signal.signal(signal.SIGINT, original_handler)
+                
+                # Calculate total response time
+                response_time = time.time() - start_time
+                self.last_response_time = response_time
+                
+                # Stop the timer thread
+                stop_timer.set()
+                timer_thread.join(timeout=1.0)
                 thinking_message.stop()
+                
+                if interrupted:
+                    self.console.print("\n[yellow]Message interrupted by user[/yellow]")
+                
+                # Record stats if available
+                if self.stats_manager and hasattr(self, 'last_tokens_prompt'):
+                    token_count = self.last_tokens_prompt + self.last_tokens_completion
+                    cost = getattr(self, 'last_total_cost', 0)
+                    
+                    self.stats_manager.record_chat(
+                        self.model_id,
+                        "received",
+                        token_count=token_count,
+                        prompt_tokens=self.last_tokens_prompt,
+                        completion_tokens=self.last_tokens_completion,
+                        cost=cost
+                    )
+                    
+                    self.stats_manager.record_model_usage(
+                        {
+                            'id': self.model_id,
+                            'name': self.model_name,
+                            'provider': self.provider
+                        },
+                        total_cost=cost
+                    )
             
-            self._display_response(ai_response)
-            self.messages.append({"role": "assistant", "content": ai_response})
+            # Display and store the response
+            if partial_response:
+                self._display_response(partial_response.strip())
+                self.messages.append({"role": "assistant", "content": partial_response.strip()})
             
-            return ai_response
-        
+            return partial_response.strip() if partial_response else None
+
         except Exception as e:
             self.logger.error(f"API Error: {e}", exc_info=True)
             self.console.print(f"[bold red]Error: {e}[/bold red]")
@@ -586,64 +835,70 @@ class AIChat:
         if not response_text:
             return
 
-        sections = []
-        current_section = []
-        lines = response_text.split('\n')
-        
-        for line in lines:
-            if (not line.strip() and current_section) or \
-               (line.strip().startswith(('•', '-', '*', '1.', '#')) and current_section):
-                if current_section:
-                    sections.append('\n'.join(current_section))
-                    current_section = []
-            if line.strip():
-                current_section.append(line)
-        
-        if current_section:
-            sections.append('\n'.join(current_section))
-        
-        if not sections:
-            sections = [response_text]
-        
-        formatted_text = []
-        for i, section in enumerate(sections):
-            if i > 0:
-                formatted_text.append("")
-            formatted_text.append(section)
-        
-        final_text = '\n'.join(formatted_text)
-
         # Get colors from settings
         colors = self._get_colors()
         
-        # Create the footer with cost if it's an OpenRouter response
-        footer = None
-        if self.provider == 'openrouter':
-            cost_parts = []
-            if hasattr(self, 'last_total_cost'):
-                if self.last_total_cost > 0:
-                    cost_parts.append(f"Cost: ${self.last_total_cost:.6f}")
-                elif self.last_total_cost == 0:
-                    cost_parts.append("Cost: Free")
-                else:
-                    cost_parts.append("Cost: Not Found")
+        # Format tool results if present
+        if hasattr(self, 'last_tool_results') and self.last_tool_results:
+            formatted_text = response_text
+        else:
+            # Format regular response
+            sections = []
+            current_section = []
+            lines = response_text.split('\n')
+            
+            for line in lines:
+                if (not line.strip() and current_section) or \
+                   (line.strip().startswith(('•', '-', '*', '1.', '#')) and current_section):
+                    if current_section:
+                        sections.append('\n'.join(current_section))
+                        current_section = []
+                if line.strip():
+                    current_section.append(line)
+            
+            if current_section:
+                sections.append('\n'.join(current_section))
+            
+            if not sections:
+                sections = [response_text]
+            
+            formatted_text = '\n\n'.join(sections)
+        
+        # Create the footer with cost and response time
+        footer_parts = []
+        
+        # Add response time
+        if hasattr(self, 'last_response_time'):
+            minutes = int(self.last_response_time // 60)
+            seconds = self.last_response_time % 60
+            time_display = f"{seconds:.2f} secs"
+            if minutes > 0:
+                time_display = f"{minutes} min {seconds:.2f} secs"
+            response_time = f"Response Time: {time_display}"
+            footer_parts.append(response_time)
+        
+        # Add cost information
+        if hasattr(self, 'last_total_cost') and hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
+            if self.last_total_cost > 0:
+                footer_parts.append(f"Cost: ${self.last_total_cost:.6f}")
+            elif self.last_total_cost == 0:
+                footer_parts.append("Cost: Free")
             else:
-                cost_parts.append("Cost: Not Found")
+                footer_parts.append("Cost: Not Found")
             
-            if hasattr(self, 'last_tokens_prompt') and hasattr(self, 'last_tokens_completion'):
-                tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
-                if hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
-                    if (self.last_native_tokens_prompt != self.last_tokens_prompt or 
-                        self.last_native_tokens_completion != self.last_tokens_completion) and \
-                        self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
-                        tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
-                cost_parts.append(tokens)
-            
-            footer = f"[bold {colors['cost']}]{' | '.join(cost_parts)}[/]"
+            tokens = f"Tokens: {self.last_tokens_prompt}+{self.last_tokens_completion}"
+            if self.provider == 'openrouter' and hasattr(self, 'last_native_tokens_prompt') and hasattr(self, 'last_native_tokens_completion'):
+                if (self.last_native_tokens_prompt != self.last_tokens_prompt or 
+                    self.last_native_tokens_completion != self.last_tokens_completion) and \
+                    self.last_native_tokens_prompt > 0 and self.last_native_tokens_completion > 0:
+                    tokens += f" (Native: {self.last_native_tokens_prompt}+{self.last_native_tokens_completion})"
+            footer_parts.append(tokens)
+        
+        footer = f"[bold {colors['cost']}]{' | '.join(footer_parts)}[/]"
         
         self.console.print(
             Panel(
-                Markdown(final_text),
+                Markdown(formatted_text),
                 title=f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]",
                 subtitle=footer,
                 border_style="bright_blue",
@@ -659,8 +914,7 @@ class AIChat:
             chats_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chats')
             os.makedirs(chats_dir, exist_ok=True)
 
-            timestamp = self.start_time.strftime("%Y%m%d_%I%M%p")
-
+            # Set up the chat directory path first
             if self.provider == 'openrouter':
                 company, model_name = self.model_id.split('/')
                 company = sanitize_path(company)
@@ -668,27 +922,51 @@ class AIChat:
                 chat_dir = os.path.join(chats_dir, 'openrouter', company, model_name)
             else:
                 chat_dir = os.path.join(chats_dir, sanitize_path(self.provider))
-
             os.makedirs(chat_dir, exist_ok=True)
 
+            # Handle custom name logic
+            if not custom_name and self.last_save_name:
+                custom_name = self.last_save_name
+            elif custom_name:
+                self.last_save_name = custom_name
+
+            # Sanitize custom name if it exists
             if custom_name:
                 custom_name = sanitize_path(custom_name)
-                base_filename = f"{custom_name}_{timestamp}"
+
+            # Generate timestamp and base filename
+            timestamp = self.start_time.strftime("%Y%m%d_%I%M%p")
+            base_filename = f"{custom_name}_{timestamp}" if custom_name else f"chat_{timestamp}"
+
+            # Check if we should reuse existing files
+            should_reuse_files = False
+            if custom_name and self.last_save_path and os.path.exists(os.path.dirname(self.last_save_path)):
+                last_save_name = os.path.splitext(os.path.basename(self.last_save_path))[0]
+                if last_save_name.startswith(custom_name + "_"):
+                    should_reuse_files = True
+
+            # Set up file paths
+            if should_reuse_files:
+                json_filepath = self.last_save_path
+                text_filepath = os.path.splitext(self.last_save_path)[0] + ".txt"
             else:
-                base_filename = f"chat_{timestamp}"
-            
-            json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
-            
-            # Calculate total tokens and cost for OpenRouter
+                json_filepath = os.path.join(chat_dir, f"{base_filename}.json")
+                text_filepath = os.path.join(chat_dir, f"{base_filename}.txt")
+
+            # Store the json filepath for future saves
+            self.last_save_path = json_filepath
+
+            # Calculate total tokens and cost
             total_prompt_tokens = 0
             total_completion_tokens = 0
             total_cost = 0
-            if self.provider == 'openrouter':
-                for i in range(1, len(self.messages), 2):
-                    if hasattr(self, f'last_tokens_prompt_{i}'):
-                        total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
-                        total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
-                        total_cost += getattr(self, f'last_total_cost_{i}', 0)
+            
+            # Iterate through message history to sum up costs
+            for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
+                if hasattr(self, f'last_tokens_prompt_{i}'):
+                    total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                    total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                    total_cost += getattr(self, f'last_total_cost_{i}', 0)
 
             # Calculate session duration
             duration = datetime.now() - self.start_time
@@ -742,10 +1020,13 @@ class AIChat:
                 f.write(f"Duration: {duration_str}\n")
                 f.write(f"System Instruction: {self.instruction_name}\n")
                 
-                if self.provider == 'openrouter':
+                if total_prompt_tokens > 0 or total_completion_tokens > 0:
                     f.write(f"Total Tokens: {total_prompt_tokens + total_completion_tokens} ")
                     f.write(f"(Prompt: {total_prompt_tokens}, Completion: {total_completion_tokens})\n")
-                    f.write(f"Total Cost: ${total_cost:.6f}\n")
+                    if total_cost > 0:
+                        f.write(f"Total Cost: ${total_cost:.6f}\n")
+                    else:
+                        f.write("Total Cost: Free\n")
 
                 if self.chroma_manager and self.chroma_manager.vectorstore:
                     f.write(f"Agent Store: {self.chroma_manager.store_name}\n")
@@ -801,13 +1082,16 @@ class AIChat:
             return False
 
     def chat_loop(self):
-        """Main chat interaction loop"""
-        self.logger.info(f"Starting chat loop for {self.model_name}")
-        
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
+        """Main chat loop"""
         def display_welcome():
-            """Display welcome message and menu"""
+            # Start a new chat session
+            if self.stats_manager:
+                self.session_id = self.stats_manager.record_session_start({
+                    'id': self.model_id,
+                    'name': self.model_name,
+                    'provider': self.provider
+                })
+
             # Display ACT logo
             logo = """[bold cyan]
     ╔═══╗╔═══╗╔════╗
@@ -821,9 +1105,14 @@ class AIChat:
             # Get colors from settings
             colors = self._get_colors()
             
+            # Get agent status if enabled
+            agent_status = ""
+            if self.chroma_manager and self.chroma_manager.vectorstore and self.chroma_manager.store_name:
+                agent_status = f" [bold cyan]〈Agent Store: {self.chroma_manager.store_name}〉[/]"
+            
             welcome_text = (
                 f"{logo}\n"
-                f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]\n\n"
+                f"[bold {colors['ai_name']}]{self.model_name}[/] [bold {colors['instruction_name']}][{self.instruction_name}][/]{agent_status}\n\n"
                 "📝 Type your message and press Enter to send\n"
                 "🔗 Reference files and directories:\n"
                 "   [[ file:example.py]]          - View single file contents\n"
@@ -839,6 +1128,7 @@ class AIChat:
                 "💾 Commands:\n"
                 "   - /help - Display detailed help guide\n"
                 "   - /info - Display chat session information\n"
+                "   - /fav - Add/remove current model to/from favorites\n"
                 "   - /save [name] - Save the chat history (optional custom name)\n"
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
@@ -889,16 +1179,30 @@ class AIChat:
         
         def exit_chat(message="Goodbye!"):
             """Exit chat with animation"""
-            # Show goodbye message with fade effect
-            self.console.print()  # Add a blank line for spacing
-            with self.console.status("[bold cyan]👋[/bold cyan]", spinner="dots") as status:
-                time.sleep(0.5)
-                self.console.print(f"[bold cyan]{message}[/bold cyan]")
-                time.sleep(1)
-            
-            # Clear screen and show main menu
-            os.system('cls' if os.name == 'nt' else 'clear')
-            display_main_menu()
+            try:
+                # Add a blank line for spacing
+                self.console.print()
+                
+                # Clear any active live displays
+                if hasattr(self.console, '_live') and self.console._live:
+                    try:
+                        self.console._live.stop()
+                    except:
+                        pass
+                    self.console._live = None
+                
+                # Show goodbye message with fade effect
+                with self.console.status("[bold cyan]👋[/bold cyan]", spinner="dots") as status:
+                    time.sleep(0.5)
+                    self.console.print(f"[bold cyan]{message}[/bold cyan]")
+                    time.sleep(1)
+                
+                # Clear screen and show main menu
+                os.system('cls' if os.name == 'nt' else 'clear')
+                display_main_menu()
+            except Exception as e:
+                # If anything fails, just print the message
+                self.console.print(f"\n[bold cyan]{message}[/bold cyan]")
         
         # Clear screen and show welcome message at start
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -909,30 +1213,25 @@ class AIChat:
                 try:
                     user_input = self.console.input("[bold yellow]You: [/bold yellow]")
                     
-                    if user_input.lower() in ['exit', 'quit', 'bye']:
-                        self.logger.info("Chat session ended by user")
-                        exit_chat("Thanks for chatting! See you next time!")
-                        break
-
-                    if user_input.startswith('/'):
-                        command_parts = user_input.strip().split(maxsplit=1)
-                        command = command_parts[0].lower()
-                        command_args = command_parts[1] if len(command_parts) > 1 else None
-
-                        if command == '/save':
-                            if len(self.messages) > 1:
-                                if command_args:
-                                    if self.save_chat(command_args):
-                                        self.console.print("[bold green]Chat history saved successfully with custom name![/bold green]")
-                                    else:
-                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
-                                else:
-                                    if self.save_chat():
-                                        self.console.print("[bold green]Chat history saved successfully![/bold green]")
-                                    else:
-                                        self.console.print("[bold red]Failed to save chat history.[/bold red]")
-                            else:
-                                self.console.print("[yellow]No messages to save yet.[/yellow]")
+                    # Check for commands
+                    if user_input.strip().startswith('/') or user_input.strip().lower() in ['bye', 'exit', 'quit', 'cya', 'adios']:
+                        command = user_input.strip().lower()
+                        
+                        # Record command message
+                        if self.stats_manager:
+                            self.stats_manager.record_chat(self.model_id, "sent", is_command=True)
+                        
+                        if command in ['bye', 'exit', 'quit', 'cya', 'adios']:
+                            self.logger.info(f"Chat session ended by user ({command} command)")
+                            if self.stats_manager and self.session_id:
+                                self.stats_manager.record_session_end(self.session_id)
+                            exit_chat("Chat session ended. Thanks for using ACT!")
+                            break
+                        elif command.startswith('/save'):
+                            # Extract name if provided
+                            parts = command.split(maxsplit=1)
+                            custom_name = parts[1] if len(parts) > 1 else None
+                            self.save_chat(custom_name)
                             continue
                         elif command == '/clear':
                             os.system('cls' if os.name == 'nt' else 'clear')
@@ -974,6 +1273,8 @@ class AIChat:
                                 continue
                         elif command == '/end':
                             self.logger.info("Chat session ended by user (/end command)")
+                            if self.stats_manager and self.session_id:
+                                self.stats_manager.record_session_end(self.session_id)
                             exit_chat("Chat session ended. Thanks for using ACT!")
                             break
                         elif command == '/help':
@@ -981,6 +1282,9 @@ class AIChat:
                             continue
                         elif command == '/info':
                             self._display_info()
+                            continue
+                        elif command == '/fav':
+                            self._display_fav()
                             continue
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
@@ -991,18 +1295,24 @@ class AIChat:
                 
                 except KeyboardInterrupt:
                     self.logger.warning("Chat interrupted by user")
+                    if self.stats_manager and self.session_id:
+                        self.stats_manager.record_session_end(self.session_id)
                     self.console.print("\n")  # Add newline for cleaner output
                     exit_chat("Chat interrupted. Thanks for using ACT!")
                     break
                 except Exception as e:
                     self.logger.error(f"Error in chat loop: {e}", exc_info=True)
+                    if self.stats_manager and self.session_id:
+                        self.stats_manager.record_session_end(self.session_id)
                     self.console.print(f"[bold red]Error: {str(e)}[/bold red]")
                     continue
         
         except Exception as e:
             self.logger.error(f"Fatal error in chat loop: {e}", exc_info=True)
+            if self.stats_manager and self.session_id:
+                self.stats_manager.record_session_end(self.session_id)
             self.console.print(f"[bold red]Fatal error: {e}[/bold red]")
-            exit_chat("Exiting due to error. Sorry for the inconvenience!") 
+            exit_chat("Exiting due to error")
 
     def _display_help(self):
         """Display detailed help information"""
@@ -1010,6 +1320,7 @@ class AIChat:
             "[bold cyan]Available Commands:[/bold cyan]\n"
             "  [bold yellow]/help[/bold yellow]    - Display this help message\n"
             "  [bold yellow]/info[/bold yellow]    - Display chat session information\n"
+            "  [bold yellow]/fav[/bold yellow]     - Add/remove current model to/from favorites\n"
             "  [bold yellow]/save[/bold yellow]    - Save chat history\n"
             "             Usage: /save [optional_name]\n"
             "  [bold yellow]/clear[/bold yellow]   - Clear screen and chat history\n"
@@ -1074,30 +1385,29 @@ class AIChat:
         ]
 
         # Add OpenRouter specific information if applicable
-        usage_info = []
-        if self.provider == 'openrouter':
-            usage_info.extend([
-                "\n[bold cyan]Usage Information:[/bold cyan]"
-            ])
-            
-            # Calculate total tokens and cost
-            total_prompt_tokens = 0
-            total_completion_tokens = 0
-            total_cost = 0
-            
-            # Iterate through message history to sum up costs
-            for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
-                if hasattr(self, f'last_tokens_prompt_{i}'):
-                    total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
-                    total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
-                    total_cost += getattr(self, f'last_total_cost_{i}', 0)
-
+        usage_info = ["\n[bold cyan]Usage Information:[/bold cyan]"]
+        
+        # Calculate total tokens and cost
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cost = 0
+        
+        # Iterate through message history to sum up costs
+        for i in range(1, len(self.messages), 2):  # Skip system message and go through user/assistant pairs
+            if hasattr(self, f'last_tokens_prompt_{i}'):
+                total_prompt_tokens += getattr(self, f'last_tokens_prompt_{i}', 0)
+                total_completion_tokens += getattr(self, f'last_tokens_completion_{i}', 0)
+                total_cost += getattr(self, f'last_total_cost_{i}', 0)
+        
+        if total_prompt_tokens > 0 or total_completion_tokens > 0:
             usage_info.extend([
                 f"  Total Prompt Tokens: {total_prompt_tokens}",
                 f"  Total Completion Tokens: {total_completion_tokens}",
                 f"  Total Tokens: {total_prompt_tokens + total_completion_tokens}",
                 f"  Total Cost: ${total_cost:.6f}" if total_cost > 0 else "  Total Cost: Free"
             ])
+        else:
+            usage_info.append("  No token usage data available")
 
         # Add agent information if available
         agent_info = []
@@ -1120,3 +1430,369 @@ class AIChat:
                 padding=(1, 2)
             )
         ) 
+
+    def _calculate_openai_cost(self, prompt_tokens, completion_tokens, model_id):
+        """Calculate cost for OpenAI models based on latest pricing
+        Rates from https://openai.com/api/pricing/
+        
+        o1 (All versions):
+        - Input: $15.00/1M tokens ($0.015 per 1K)
+        - Output: $60.00/1M tokens ($0.06 per 1K)
+        Note: Output includes internal reasoning tokens
+        
+        o1-mini (All versions):
+        - Input: $3.00/1M tokens ($0.003 per 1K)
+        - Output: $12.00/1M tokens ($0.012 per 1K)
+        Note: Output includes internal reasoning tokens
+        
+        GPT-4o (All versions):
+        - Input: $2.50/1M tokens ($0.0025 per 1K)
+        - Output: $10.00/1M tokens ($0.01 per 1K)
+        - Audio Input: $100.00/1M tokens ($0.10 per 1K)
+        - Audio Output: $200.00/1M tokens ($0.20 per 1K)
+        
+        GPT-4o mini:
+        - Input: $0.150/1M tokens ($0.00015 per 1K)
+        - Output: $0.600/1M tokens ($0.0006 per 1K)
+        - Audio Input: $10.000/1M tokens ($0.01 per 1K)
+        - Audio Output: $20.000/1M tokens ($0.02 per 1K)
+        
+        chatgpt-4o-latest:
+        - Input: $5.00/1M tokens ($0.005 per 1K)
+        - Output: $15.00/1M tokens ($0.015 per 1K)
+        
+        GPT-4 Models:
+        - GPT-4 Turbo (all versions): $10.00/1M input, $30.00/1M output
+        - GPT-4 Base: $30.00/1M input, $60.00/1M output
+        - GPT-4-32k: $60.00/1M input, $120.00/1M output
+        - GPT-4 Vision Preview: $10.00/1M input, $30.00/1M output
+        
+        GPT-3.5 Models:
+        - GPT-3.5 Turbo (0125): $0.50/1M input, $1.50/1M output
+        - GPT-3.5 Turbo Instruct: $1.50/1M input, $2.00/1M output
+        - GPT-3.5 Turbo (1106): $1.00/1M input, $2.00/1M output
+        - GPT-3.5 Turbo (0613): $1.50/1M input, $2.00/1M output
+        - GPT-3.5 Turbo 16k: $3.00/1M input, $4.00/1M output
+        - GPT-3.5 Turbo (0301): $1.50/1M input, $2.00/1M output
+        
+        Base Models:
+        - Davinci-002: $2.00/1M tokens (both input/output)
+        - Babbage-002: $0.40/1M tokens (both input/output)
+        """
+        # o1 pricing (all versions including preview and dated versions)
+        if any(x in model_id for x in ["o1-2024-", "o1-preview", "o1"]) and "mini" not in model_id:
+            prompt_cost = 0.015 * (prompt_tokens / 1000)  # $15.00 per 1M tokens
+            completion_cost = 0.06 * (completion_tokens / 1000)  # $60.00 per 1M tokens
+        
+        # o1-mini pricing (all versions)
+        elif "o1-mini" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.012 * (completion_tokens / 1000)  # $12.00 per 1M tokens
+        
+        # GPT-4o pricing (all versions including 2024-11-20, 2024-08-06)
+        elif any(x in model_id for x in ["gpt-4o-2024-", "gpt-4o"]) and "mini" not in model_id:
+            if "audio" in model_id:
+                # Audio model pricing
+                prompt_cost = 0.10 * (prompt_tokens / 1000)  # $100.00 per 1M tokens
+                completion_cost = 0.20 * (completion_tokens / 1000)  # $200.00 per 1M tokens
+            else:
+                # Standard text model pricing
+                prompt_cost = 0.0025 * (prompt_tokens / 1000)  # $2.50 per 1M tokens
+                completion_cost = 0.01 * (completion_tokens / 1000)  # $10.00 per 1M tokens
+        
+        # GPT-4o mini pricing (all versions)
+        elif "gpt-4o-mini" in model_id:
+            if "audio" in model_id:
+                # Audio model pricing
+                prompt_cost = 0.01 * (prompt_tokens / 1000)  # $10.00 per 1M tokens
+                completion_cost = 0.02 * (completion_tokens / 1000)  # $20.00 per 1M tokens
+            else:
+                # Standard text model pricing
+                prompt_cost = 0.00015 * (prompt_tokens / 1000)  # $0.150 per 1M tokens
+                completion_cost = 0.0006 * (completion_tokens / 1000)  # $0.600 per 1M tokens
+        
+        # chatgpt-4o-latest pricing
+        elif "chatgpt-4o-latest" in model_id:
+            prompt_cost = 0.005 * (prompt_tokens / 1000)  # $5.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # GPT-4 32k pricing
+        elif "gpt-4-32k" in model_id:
+            prompt_cost = 0.06 * (prompt_tokens / 1000)  # $60.00 per 1M tokens
+            completion_cost = 0.12 * (completion_tokens / 1000)  # $120.00 per 1M tokens
+        
+        # GPT-4 Turbo pricing (including all preview versions)
+        elif any(x in model_id for x in ["gpt-4-turbo", "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4-vision-preview"]):
+            prompt_cost = 0.01 * (prompt_tokens / 1000)  # $10.00 per 1M tokens
+            completion_cost = 0.03 * (completion_tokens / 1000)  # $30.00 per 1M tokens
+        
+        # Base GPT-4 pricing
+        elif "gpt-4" in model_id:
+            prompt_cost = 0.03 * (prompt_tokens / 1000)  # $30.00 per 1M tokens
+            completion_cost = 0.06 * (completion_tokens / 1000)  # $60.00 per 1M tokens
+        
+        # GPT-3.5 Turbo 16k pricing
+        elif "gpt-3.5-turbo-16k" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.004 * (completion_tokens / 1000)  # $4.00 per 1M tokens
+        
+        # GPT-3.5 Turbo 0125 pricing (latest)
+        elif "gpt-3.5-turbo-0125" in model_id:
+            prompt_cost = 0.0005 * (prompt_tokens / 1000)  # $0.50 per 1M tokens
+            completion_cost = 0.0015 * (completion_tokens / 1000)  # $1.50 per 1M tokens
+        
+        # GPT-3.5 Turbo 1106 pricing
+        elif "gpt-3.5-turbo-1106" in model_id:
+            prompt_cost = 0.001 * (prompt_tokens / 1000)  # $1.00 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # GPT-3.5 Turbo Instruct pricing
+        elif "gpt-3.5-turbo-instruct" in model_id:
+            prompt_cost = 0.0015 * (prompt_tokens / 1000)  # $1.50 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # GPT-3.5 Turbo older versions (0613, 0301)
+        elif "gpt-3.5-turbo" in model_id:
+            prompt_cost = 0.0015 * (prompt_tokens / 1000)  # $1.50 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # Davinci-002 pricing
+        elif "davinci-002" in model_id:
+            prompt_cost = 0.002 * (prompt_tokens / 1000)  # $2.00 per 1M tokens
+            completion_cost = 0.002 * (completion_tokens / 1000)  # $2.00 per 1M tokens
+        
+        # Babbage-002 pricing
+        elif "babbage-002" in model_id:
+            prompt_cost = 0.0004 * (prompt_tokens / 1000)  # $0.40 per 1M tokens
+            completion_cost = 0.0004 * (completion_tokens / 1000)  # $0.40 per 1M tokens
+        
+        # Default to GPT-3.5 Turbo 0125 pricing for unknown models
+        else:
+            prompt_cost = 0.0005 * (prompt_tokens / 1000)  # $0.50 per 1M tokens
+            completion_cost = 0.0015 * (completion_tokens / 1000)  # $1.50 per 1M tokens
+        
+        return prompt_cost + completion_cost 
+
+    def _calculate_anthropic_cost(self, prompt_tokens, completion_tokens, model_id):
+        """Calculate cost for Anthropic models based on latest pricing
+        
+        Claude 3.5 Models:
+        - Claude 3.5 Sonnet: $3.00/1M input, $15.00/1M output
+        - Claude 3.5 Haiku: $0.80/1M input, $4.00/1M output
+        
+        Claude 3 Models:
+        - Claude 3 Opus: $15.00/1M input, $75.00/1M output
+        - Claude 3 Sonnet: $3.00/1M input, $15.00/1M output
+        - Claude 3 Haiku: $0.25/1M input, $1.25/1M output
+        """
+        # Claude 3.5 Sonnet pricing
+        if "claude-3-5-sonnet" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # Claude 3.5 Haiku pricing
+        elif "claude-3-5-haiku" in model_id:
+            prompt_cost = 0.0008 * (prompt_tokens / 1000)  # $0.80 per 1M tokens
+            completion_cost = 0.004 * (completion_tokens / 1000)  # $4.00 per 1M tokens
+        
+        # Claude 3 Opus pricing
+        elif "claude-3-opus" in model_id:
+            prompt_cost = 0.015 * (prompt_tokens / 1000)  # $15.00 per 1M tokens
+            completion_cost = 0.075 * (completion_tokens / 1000)  # $75.00 per 1M tokens
+        
+        # Claude 3 Sonnet pricing
+        elif "claude-3-sonnet" in model_id:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        # Claude 3 Haiku pricing
+        elif "claude-3-haiku" in model_id:
+            prompt_cost = 0.00025 * (prompt_tokens / 1000)  # $0.25 per 1M tokens
+            completion_cost = 0.00125 * (completion_tokens / 1000)  # $1.25 per 1M tokens
+        
+        # Default to Claude 3 Sonnet pricing for unknown models
+        else:
+            prompt_cost = 0.003 * (prompt_tokens / 1000)  # $3.00 per 1M tokens
+            completion_cost = 0.015 * (completion_tokens / 1000)  # $15.00 per 1M tokens
+        
+        return prompt_cost + completion_cost 
+
+    def _display_fav(self):
+        """Add or remove current model from favorites"""
+        try:
+            # Create favorites.json path
+            favorites_path = os.path.join(os.path.dirname(__file__), 'favorites.json')
+            
+            # Load existing favorites
+            if os.path.exists(favorites_path):
+                with open(favorites_path, 'r') as f:
+                    favorites = json.load(f)['favorites']
+            else:
+                favorites = []
+            
+            # Format display name
+            display_name = self.model_name
+            if self.provider == 'openrouter' and display_name.startswith(f"{self.model_id.split('/')[0].title()}: "):
+                # Name already has provider prefix, use it as is
+                display_name = self.model_name
+            elif self.provider == 'openrouter' and '/' in self.model_id:
+                # Add provider prefix if not present
+                company = self.model_id.split('/')[0].title()
+                display_name = f"{company}: {display_name}"
+            
+            # Check if model is already in favorites
+            model_id = self.model_id
+            is_favorite = any(f['id'] == model_id for f in favorites)
+            
+            if is_favorite:
+                # Remove from favorites
+                favorites = [f for f in favorites if f['id'] != model_id]
+                self.console.print(f"[yellow]Removed {display_name} from favorites[/yellow]")
+            else:
+                # For OpenRouter models, get description from API
+                if self.provider == 'openrouter':
+                    try:
+                        response = requests.get(
+                            f"https://openrouter.ai/api/v1/models",
+                            headers=get_openrouter_headers(self.api_key)
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            if 'data' in data:
+                                for model in data['data']:
+                                    if model['id'] == model_id:
+                                        description = model.get('description')
+                                        break
+                                else:
+                                    description = f"{display_name} ({self.provider})"
+                        else:
+                            description = f"{display_name} ({self.provider})"
+                    except:
+                        description = f"{display_name} ({self.provider})"
+                else:
+                    # For other providers, try to get description from models.json
+                    description = None
+                    models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+                    if os.path.exists(models_path):
+                        try:
+                            with open(models_path, 'r') as f:
+                                models = json.load(f)['models']
+                                for model in models:
+                                    if model['id'] == model_id:
+                                        description = model.get('description')
+                                        break
+                        except:
+                            pass
+                    if not description:
+                        description = f"{display_name} ({self.provider})"
+                
+                # Add to favorites
+                favorite = {
+                    'id': model_id,
+                    'name': display_name,
+                    'provider': self.provider,
+                    'description': description
+                }
+                favorites.append(favorite)
+                self.console.print(f"[green]Added {display_name} to favorites[/green]")
+            
+            # Save updated favorites
+            with open(favorites_path, 'w') as f:
+                json.dump({'favorites': favorites}, f, indent=4)
+            
+        except Exception as e:
+            self.logger.error(f"Error managing favorites: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error managing favorites: {e}[/bold red]")
+
+    def _execute_tool_call(self, tool_call):
+        """Execute a tool call and return the result"""
+        try:
+            function_name = tool_call['function']['name']
+            arguments = json.loads(tool_call['function']['arguments'])
+
+            if function_name == 'search':
+                # Implement web search functionality
+                query = arguments['query']
+                # This is a placeholder - you would implement actual web search here
+                return f"Based on my search, here are the results for '{query}'\n(Web search functionality not implemented yet)"
+
+            elif function_name == 'calculate':
+                # Implement safe mathematical calculation
+                expression = arguments['expression']
+                try:
+                    # Use ast.literal_eval for safe evaluation
+                    import ast
+                    import operator
+                    
+                    def safe_eval(node):
+                        operators = {
+                            ast.Add: operator.add,
+                            ast.Sub: operator.sub,
+                            ast.Mult: operator.mul,
+                            ast.Div: operator.truediv,
+                            ast.Pow: operator.pow,
+                            ast.USub: operator.neg,
+                        }
+                        
+                        if isinstance(node, ast.Num):
+                            return node.n
+                        elif isinstance(node, ast.BinOp):
+                            left = safe_eval(node.left)
+                            right = safe_eval(node.right)
+                            return operators[type(node.op)](left, right)
+                        elif isinstance(node, ast.UnaryOp):
+                            operand = safe_eval(node.operand)
+                            return operators[type(node.op)](operand)
+                        else:
+                            raise ValueError(f"Unsupported operation: {type(node)}")
+                    
+                    tree = ast.parse(expression, mode='eval')
+                    result = safe_eval(tree.body)
+                    return f"The result of the calculation is: {result}"
+                except Exception as e:
+                    return f"I encountered an error while calculating: {str(e)}"
+
+            elif function_name == 'get_time':
+                # Implement time/date functionality with New York as default
+                from datetime import datetime
+                import pytz
+                
+                timezone = arguments.get('timezone', 'America/New_York')  # Default to New York
+                try:
+                    tz = pytz.timezone(timezone)
+                    current_time = datetime.now(tz)
+                    return f"The current time is {current_time.strftime('%I:%M %p')} on {current_time.strftime('%A, %B %d, %Y')} ({timezone})"
+                except Exception as e:
+                    return f"I encountered an error while getting the time: {str(e)}"
+
+            elif function_name == 'get_weather':
+                # Implement weather functionality
+                location = arguments['location']
+                # This is a placeholder - you would implement actual weather API call here
+                return f"Here's the current weather for {location}\n(Weather functionality not implemented yet)"
+
+            elif function_name == 'system_info':
+                # Implement system information functionality
+                import platform
+                import psutil
+                
+                info_type = arguments['info_type']
+                if info_type == 'os':
+                    return f"Your system is running {platform.system()} {platform.version()}"
+                elif info_type == 'cpu':
+                    return f"Your CPU is currently at {psutil.cpu_percent()}% usage"
+                elif info_type == 'memory':
+                    memory = psutil.virtual_memory()
+                    return f"Your memory usage is at {memory.percent}% (Using {memory.used/1024/1024/1024:.1f}GB out of {memory.total/1024/1024/1024:.1f}GB)"
+                elif info_type == 'disk':
+                    disk = psutil.disk_usage('/')
+                    return f"Your disk usage is at {disk.percent}% (Using {disk.used/1024/1024/1024:.1f}GB out of {disk.total/1024/1024/1024:.1f}GB)"
+                else:
+                    return f"I don't have information about {info_type}"
+
+            else:
+                return f"I don't know how to handle the tool: {function_name}"
+
+        except Exception as e:
+            self.logger.error(f"Error executing tool call: {e}", exc_info=True)
+            return f"I encountered an error while using the tool: {str(e)}"

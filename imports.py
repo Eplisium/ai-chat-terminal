@@ -8,6 +8,8 @@ from datetime import datetime
 import time
 import dotenv
 import rich
+import threading
+import signal
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
