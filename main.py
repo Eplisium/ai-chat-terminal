@@ -511,6 +511,7 @@ class AIChatApp:
                 ("=== Data Management ===", None),
                 ("🗑️ Clear All Logs", "clear_logs"),
                 ("🗑️ Clear Chat History", "clear_chats"),
+                ("🗑️ Clear Statistics DB", "clear_db"),
                 ("=== Navigation ===", None),
                 ("Back to Main Menu", "back")
             ]
@@ -541,6 +542,11 @@ class AIChatApp:
                 confirm = inquirer.confirm("Are you sure you want to clear all chat history?", default=False)
                 if confirm:
                     self.data_manager.clear_chats()
+            elif answer['setting'] == "clear_db":
+                confirm = inquirer.confirm("Are you sure you want to clear all statistics data? This cannot be undone.", default=False)
+                if confirm:
+                    self.stats_manager.clear_db()
+                    self.console.print("[green]Statistics database cleared successfully![/green]")
 
     def manage_ai_settings(self):
         """Display AI settings management menu"""
