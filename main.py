@@ -488,7 +488,22 @@ class AIChatApp:
                     self.console.print("[yellow]No instructions available[/yellow]")
                     continue
                 
-                for instruction in instructions:
+                instruction_choices = [
+                    (f"{i['name']}", i) for i in instructions
+                ]
+                instruction_choices.append(("Back", None))
+                
+                view_question = [
+                    inquirer.List('instruction',
+                        message="Select instruction to view",
+                        choices=instruction_choices,
+                        carousel=True
+                    ),
+                ]
+                
+                view_answer = inquirer.prompt(view_question)
+                if view_answer and view_answer['instruction']:
+                    instruction = view_answer['instruction']
                     is_selected = instruction['name'] == current_name
                     self.console.print(
                         Panel(
@@ -497,8 +512,7 @@ class AIChatApp:
                             border_style="green" if is_selected else "white"
                         )
                     )
-                
-                self.console.input("\nPress Enter to continue...")
+                    self.console.input("\nPress Enter to continue...")
 
     def manage_settings(self):
         """Display settings management menu"""
