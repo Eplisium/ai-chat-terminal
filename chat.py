@@ -1137,11 +1137,11 @@ class AIChat:
                     "total_cost": total_cost
                 }
 
-            # Add agent information if available
-            if self.chroma_manager and self.chroma_manager.vectorstore:
+            # Add RAG information if available
+            if self.chroma_manager and self.chroma_manager.store_name:
                 chat_data["agent"] = {
                     "store": self.chroma_manager.store_name,
-                    "embedding_model": self.chroma_manager.embedding_model_name
+                    "model": self.chroma_manager.embedding_model_name
                 }
 
             with open(json_filepath, 'w', encoding='utf-8') as f:
@@ -1167,8 +1167,8 @@ class AIChat:
                     else:
                         f.write("Total Cost: Free\n")
 
-                if self.chroma_manager and self.chroma_manager.vectorstore:
-                    f.write(f"Agent Store: {self.chroma_manager.store_name}\n")
+                if self.chroma_manager and self.chroma_manager.store_name:
+                    f.write(f"RAG Store: {self.chroma_manager.store_name}\n")
                     f.write(f"Embedding Model: {self.chroma_manager.embedding_model_name}\n")
 
                 f.write("="*80 + "\n\n")
@@ -1244,10 +1244,10 @@ class AIChat:
             # Get colors from settings
             colors = self._get_colors()
             
-            # Get agent status if enabled
+            # Get RAG status if enabled
             agent_status = ""
-            if self.chroma_manager and self.chroma_manager.vectorstore and self.chroma_manager.store_name:
-                agent_status = f" [bold cyan]〈Agent Store: {self.chroma_manager.store_name}〉[/]"
+            if self.chroma_manager and self.chroma_manager.store_name:
+                agent_status = f" [bold cyan]〈RAG Store: {self.chroma_manager.store_name}〉[/]"
             
             welcome_text = (
                 f"{logo}\n"
@@ -1548,13 +1548,13 @@ class AIChat:
         else:
             usage_info.append("  No token usage data available")
 
-        # Add agent information if available
+        # Add RAG information if available
         agent_info = []
-        if self.chroma_manager and self.chroma_manager.vectorstore:
+        if self.chroma_manager and self.chroma_manager.store_name:
             agent_info.extend([
-                "\n[bold cyan]Agent Information:[/bold cyan]",
-                f"  Store: {self.chroma_manager.store_name}",
-                f"  Embedding Model: {self.chroma_manager.embedding_model_name}"
+                "\n[bold cyan]RAG Information:[/bold cyan]",
+                f"Store: {self.chroma_manager.store_name}",
+                f"Embedding Model: {self.chroma_manager.embedding_model_name}"
             ])
 
         # Combine all sections

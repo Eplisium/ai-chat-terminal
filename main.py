@@ -595,7 +595,7 @@ class AIChatApp:
 
             choices = [
                 ("═══ AI Settings ═══", None),
-                (f"🤖 Agent           〈{agent_status}〉", "agent"),
+                (f"🤖 RAG           〈{agent_status}〉", "agent"),
                 (f"🤖 Streaming Mode   〈{streaming_status}〉", "streaming"),
                 (f"🤖️ AI Tools         〈{tools_status}〉", "tools"),
                 (f"🤖 System Instructions 〈{current_instruction}〉", "instructions"),
@@ -694,7 +694,7 @@ class AIChatApp:
                     self.console.print(f"{icon} {tool_name.title()} tool {new_status}")
 
     def manage_agent_settings(self, agent_status):
-        """Manage Agent settings"""
+        """Manage RAG settings"""
         while True:
             settings = self._load_settings()
             agent_settings = settings.get('agent', {})
@@ -706,11 +706,11 @@ class AIChatApp:
                 current_store = self.chroma_manager.store_name
 
             choices = [
-                ("═══ Agent Settings ═══", None),
+                ("═══ RAG Settings ═══", None),
                 (f"Current Status: {self._get_agent_status_display()}", None),
                 (f"Current Store: {current_store}", None),
                 ("Select Embedding Model", "model"),
-                ("Toggle Agent", "toggle"),
+                ("Toggle RAG", "toggle"),
                 ("Test Embeddings", "test_embeddings"),
                 ("ChromaDB Settings", "chromadb_settings"),
             ]
@@ -736,7 +736,7 @@ class AIChatApp:
 
             questions = [
                 inquirer.List('action',
-                    message="Manage Agent Settings",
+                    message="Manage RAG Settings",
                     choices=choices,
                     carousel=True
                 ),
@@ -754,12 +754,12 @@ class AIChatApp:
                 self._save_settings(settings)
                 new_status = "enabled" if not agent_enabled else "disabled"
                 icon = "🟡" if not agent_enabled else "⭕"
-                self.console.print(f"{icon} Agent {new_status}")
+                self.console.print(f"{icon} RAG {new_status}")
                 continue  # Continue the loop instead of returning
 
             elif answer['action'] == "test_embeddings":
                 if not self.chroma_manager:
-                    self.console.print("[yellow]Please enable the agent first[/yellow]")
+                    self.console.print("[yellow]Please enable RAG first[/yellow]")
                     continue
                 self.chroma_manager.test_embeddings()
 
@@ -768,7 +768,7 @@ class AIChatApp:
 
             elif answer['action'] == "chromadb_settings":
                 if not self.chroma_manager:
-                    self.console.print("[yellow]Please enable the agent first[/yellow]")
+                    self.console.print("[yellow]Please enable RAG first[/yellow]")
                     continue
                 
                 settings = self._load_settings()
@@ -1438,7 +1438,7 @@ class AIChatApp:
                 openrouter_available = bool(os.getenv('OPENROUTER_API_KEY'))
                 anthropic_available = bool(os.getenv('ANTHROPIC_API_KEY'))
                 
-                # Check if Agent is enabled and active
+                # Check if RAG is enabled and active
                 settings = self._load_settings()
                 agent_enabled = settings.get('agent', {}).get('enabled', False)
                 agent_active = (
@@ -1448,20 +1448,20 @@ class AIChatApp:
                     self.chroma_manager.store_name is not None
                 )
                 
-                # Get agent status for main menu
+                # Get RAG status for main menu
                 agent_info = f" 〈{self._get_agent_status_display()}〉"
                 
-                # Update main menu choices with agent status
+                # Update main menu choices with RAG status
                 main_choices = [
                     ("═══ Select Your AI Provider ═══", None),
                     ("★ Favorite Models   〈Your preferred AI companions〉", "favorites"),
                 ]
                 
-                # OpenAI status - Green when agent is enabled
+                # OpenAI status - Green when RAG is enabled
                 if openai_available:
                     if agent_enabled:
-                        status = "🟢"  # Green for normal operation with agent
-                        status_info = " 〈Agent: Enabled〉"
+                        status = "🟢"  # Green for normal operation with RAG
+                        status_info = " 〈RAG: Enabled〉"
                     else:
                         status = "🟢"  # Green for normal operation
                         status_info = ""
@@ -1472,18 +1472,18 @@ class AIChatApp:
                 # OpenRouter status - Always green when available
                 if openrouter_available:
                     if agent_enabled:
-                        status_info = " 〈Agent: Enabled〉"
+                        status_info = " 〈RAG: Enabled〉"
                     else:
                         status_info = ""
                     main_choices.append((f"🟢 OpenRouter Models 〈Multiple Providers〉{status_info}", "openrouter"))
                 else:
                     main_choices.append(("○ OpenRouter Models 〈API Key Required〉", None))
                 
-                # Anthropic status - Now supports agent mode
+                # Anthropic status - Now supports RAG mode
                 if anthropic_available:
                     if agent_enabled:
-                        status = "🟢"  # Green for normal operation with agent
-                        status_info = " 〈Agent: Enabled〉"
+                        status = "🟢"  # Green for normal operation with RAG
+                        status_info = " 〈RAG: Enabled〉"
                     else:
                         status = "🟢"  # Green for normal operation
                         status_info = ""
@@ -1678,7 +1678,7 @@ class AIChatApp:
             if system_instruction:
                 self.stats_manager.record_instruction_usage(system_instruction['name'])
             
-            # Enable file context for all providers when agent is enabled
+            # Enable file context for all providers when RAG is enabled
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
             enable_file_context = (
@@ -1802,7 +1802,7 @@ class AIChatApp:
             self.logger.error(f"Error saving settings: {e}")
 
     def _get_agent_status_display(self):
-        """Get formatted agent status for display"""
+        """Get formatted RAG status for display"""
         settings = self._load_settings()
         agent_enabled = settings.get('agent', {}).get('enabled', False)
         agent_active = (
