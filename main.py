@@ -1751,36 +1751,46 @@ class AIChatApp:
                             'enabled': False
                         }
                     
-                    # Ensure tools settings exist with defaults
-                    if 'tools' not in settings:
-                        settings['tools'] = {
-                            'enabled': False,
-                            'available_tools': {
-                                'search': {
-                                    'enabled': True,
-                                    'description': 'Search the web for information'
-                                },
-                                'calculate': {
-                                    'enabled': True,
-                                    'description': 'Perform mathematical calculations'
-                                },
-                                'time': {
-                                    'enabled': True,
-                                    'description': 'Get current time and date information'
-                                },
-                                'weather': {
-                                    'enabled': True,
-                                    'description': 'Get weather information'
-                                },
-                                'system': {
-                                    'enabled': True,
-                                    'description': 'Access system information and perform OS operations'
+                    # Load tools configuration from tools_config.json
+                    tools_config_file = os.path.join(os.path.dirname(__file__), 'tools', 'tools_config.json')
+                    if os.path.exists(tools_config_file):
+                        with open(tools_config_file, 'r', encoding='utf-8') as f:
+                            tools_config = json.load(f)
+                            if 'tools' not in settings:
+                                settings['tools'] = {
+                                    'enabled': False,
+                                    'available_tools': tools_config['tools']
                                 }
+                            else:
+                                # Update available tools while preserving enabled status
+                                available_tools = settings['tools'].get('available_tools', {})
+                                for tool_name, tool_info in tools_config['tools'].items():
+                                    if tool_name not in available_tools:
+                                        available_tools[tool_name] = tool_info
+                                    else:
+                                        # Update tool info but preserve enabled status
+                                        enabled_status = available_tools[tool_name].get('enabled', True)
+                                        available_tools[tool_name] = tool_info
+                                        available_tools[tool_name]['enabled'] = enabled_status
+                                
+                                # Remove tools that no longer exist
+                                for tool_name in list(available_tools.keys()):
+                                    if tool_name not in tools_config['tools']:
+                                        del available_tools[tool_name]
+                                
+                                settings['tools']['available_tools'] = available_tools
+                    else:
+                        # Default tools settings if tools_config.json doesn't exist
+                        if 'tools' not in settings:
+                            settings['tools'] = {
+                                'enabled': False,
+                                'available_tools': {}
                             }
-                        }
-                        
+                    
                     self._save_settings(settings)
                     return settings
+            
+            # Default settings if settings file doesn't exist
             return {
                 'agent': {
                     'enabled': False
@@ -1790,28 +1800,7 @@ class AIChatApp:
                 },
                 'tools': {
                     'enabled': False,
-                    'available_tools': {
-                        'search': {
-                            'enabled': True,
-                            'description': 'Search the web for information'
-                        },
-                        'calculate': {
-                            'enabled': True,
-                            'description': 'Perform mathematical calculations'
-                        },
-                        'time': {
-                            'enabled': True,
-                            'description': 'Get current time and date information'
-                        },
-                        'weather': {
-                            'enabled': True,
-                            'description': 'Get weather information'
-                        },
-                        'system': {
-                            'enabled': True,
-                            'description': 'Access system information and perform OS operations'
-                        }
-                    }
+                    'available_tools': {}
                 }
             }
         except Exception as e:

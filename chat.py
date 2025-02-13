@@ -1,5 +1,6 @@
 from imports import *
 from utils import log_api_response, encode_image_to_base64, get_image_mime_type, read_document_content, sanitize_path
+from managers.tools_manager import ToolsManager
 import re
 import glob
 
@@ -108,19 +109,16 @@ class AIChat:
         self.last_save_path = None  # Track last save location
         self.last_save_name = None  # Track last used custom name
         
+        # Initialize tools manager
+        self.tools_manager = ToolsManager(logger=logger, settings_manager=settings_manager)
+        
         # Get streaming and tools settings
         self.streaming_enabled = False
         self.tools_enabled = False
-        self.available_tools = {}
         if self.settings_manager:
             settings = self.settings_manager._load_settings()
             self.streaming_enabled = settings.get('streaming', {}).get('enabled', False)
             self.tools_enabled = settings.get('tools', {}).get('enabled', False)
-            if self.tools_enabled:
-                self.available_tools = {
-                    name: info for name, info in settings.get('tools', {}).get('available_tools', {}).items()
-                    if info.get('enabled', True)
-                }
         
         # Handle system instruction name and content
         if isinstance(system_instruction, dict):
@@ -585,99 +583,8 @@ class AIChat:
                     }
 
                     # Add tools if enabled and available
-                    if self.tools_enabled and self.available_tools:
-                        tools = []
-                        if 'search' in self.available_tools:
-                            tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": "search",
-                                    "description": "Search the web for information",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "query": {
-                                                "type": "string",
-                                                "description": "The search query"
-                                            }
-                                        },
-                                        "required": ["query"]
-                                    }
-                                }
-                            })
-                        if 'calculate' in self.available_tools:
-                            tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": "calculate",
-                                    "description": "Perform mathematical calculations",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "expression": {
-                                                "type": "string",
-                                                "description": "The mathematical expression to evaluate"
-                                            }
-                                        },
-                                        "required": ["expression"]
-                                    }
-                                }
-                            })
-                        if 'time' in self.available_tools:
-                            tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": "get_time",
-                                    "description": "Get current time and date information",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "timezone": {
-                                                "type": "string",
-                                                "description": "Optional timezone (e.g., 'UTC', 'America/New_York')"
-                                            }
-                                        }
-                                    }
-                                }
-                            })
-                        if 'weather' in self.available_tools:
-                            tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": "get_weather",
-                                    "description": "Get weather information",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "location": {
-                                                "type": "string",
-                                                "description": "Location to get weather for"
-                                            }
-                                        },
-                                        "required": ["location"]
-                                    }
-                                }
-                            })
-                        if 'system' in self.available_tools:
-                            tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": "system_info",
-                                    "description": "Get system information",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "info_type": {
-                                                "type": "string",
-                                                "description": "Type of system information to retrieve (e.g., 'os', 'cpu', 'memory')",
-                                                "enum": ["os", "cpu", "memory", "disk"]
-                                            }
-                                        },
-                                        "required": ["info_type"]
-                                    }
-                                }
-                            })
-                        
+                    if self.tools_enabled:
+                        tools = self.tools_manager.get_enabled_tools()
                         if tools:
                             request_data["tools"] = tools
                             request_data["tool_choice"] = "auto"
@@ -716,7 +623,7 @@ class AIChat:
                                                 messages.append(assistant_message)
                                                 
                                                 # Execute tool call and get result
-                                                result = self._execute_tool_call(tool_call)
+                                                result = self.tools_manager.execute_tool(tool_call)
                                                 
                                                 # Add tool result as a message
                                                 messages.append({
@@ -773,7 +680,7 @@ class AIChat:
                             
                             # Execute tool calls and collect results
                             for tool_call in data['choices'][0]['message']['tool_calls']:
-                                result = self._execute_tool_call(tool_call)
+                                result = self.tools_manager.execute_tool(tool_call)
                                 tool_results.append(result)
                                 
                                 # Add tool result as a message
@@ -1850,93 +1757,4 @@ class AIChat:
 
     def _execute_tool_call(self, tool_call):
         """Execute a tool call and return the result"""
-        try:
-            function_name = tool_call['function']['name']
-            arguments = json.loads(tool_call['function']['arguments'])
-
-            if function_name == 'search':
-                # Implement web search functionality
-                query = arguments['query']
-                # This is a placeholder - you would implement actual web search here
-                return f"Based on my search, here are the results for '{query}'\n(Web search functionality not implemented yet)"
-
-            elif function_name == 'calculate':
-                # Implement safe mathematical calculation
-                expression = arguments['expression']
-                try:
-                    # Use ast.literal_eval for safe evaluation
-                    import ast
-                    import operator
-                    
-                    def safe_eval(node):
-                        operators = {
-                            ast.Add: operator.add,
-                            ast.Sub: operator.sub,
-                            ast.Mult: operator.mul,
-                            ast.Div: operator.truediv,
-                            ast.Pow: operator.pow,
-                            ast.USub: operator.neg,
-                        }
-                        
-                        if isinstance(node, ast.Num):
-                            return node.n
-                        elif isinstance(node, ast.BinOp):
-                            left = safe_eval(node.left)
-                            right = safe_eval(node.right)
-                            return operators[type(node.op)](left, right)
-                        elif isinstance(node, ast.UnaryOp):
-                            operand = safe_eval(node.operand)
-                            return operators[type(node.op)](operand)
-                        else:
-                            raise ValueError(f"Unsupported operation: {type(node)}")
-                    
-                    tree = ast.parse(expression, mode='eval')
-                    result = safe_eval(tree.body)
-                    return f"The result of the calculation is: {result}"
-                except Exception as e:
-                    return f"I encountered an error while calculating: {str(e)}"
-
-            elif function_name == 'get_time':
-                # Implement time/date functionality with New York as default
-                from datetime import datetime
-                import pytz
-                
-                timezone = arguments.get('timezone', 'America/New_York')  # Default to New York
-                try:
-                    tz = pytz.timezone(timezone)
-                    current_time = datetime.now(tz)
-                    return f"The current time is {current_time.strftime('%I:%M %p')} on {current_time.strftime('%A, %B %d, %Y')} ({timezone})"
-                except Exception as e:
-                    return f"I encountered an error while getting the time: {str(e)}"
-
-            elif function_name == 'get_weather':
-                # Implement weather functionality
-                location = arguments['location']
-                # This is a placeholder - you would implement actual weather API call here
-                return f"Here's the current weather for {location}\n(Weather functionality not implemented yet)"
-
-            elif function_name == 'system_info':
-                # Implement system information functionality
-                import platform
-                import psutil
-                
-                info_type = arguments['info_type']
-                if info_type == 'os':
-                    return f"Your system is running {platform.system()} {platform.version()}"
-                elif info_type == 'cpu':
-                    return f"Your CPU is currently at {psutil.cpu_percent()}% usage"
-                elif info_type == 'memory':
-                    memory = psutil.virtual_memory()
-                    return f"Your memory usage is at {memory.percent}% (Using {memory.used/1024/1024/1024:.1f}GB out of {memory.total/1024/1024/1024:.1f}GB)"
-                elif info_type == 'disk':
-                    disk = psutil.disk_usage('/')
-                    return f"Your disk usage is at {disk.percent}% (Using {disk.used/1024/1024/1024:.1f}GB out of {disk.total/1024/1024/1024:.1f}GB)"
-                else:
-                    return f"I don't have information about {info_type}"
-
-            else:
-                return f"I don't know how to handle the tool: {function_name}"
-
-        except Exception as e:
-            self.logger.error(f"Error executing tool call: {e}", exc_info=True)
-            return f"I encountered an error while using the tool: {str(e)}"
+        return self.tools_manager.execute_tool(tool_call)

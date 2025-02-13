@@ -1,0 +1,64 @@
+{
+    "tools": {
+        "search": {
+            "enabled": true,
+            "description": "Execute search tool",
+            "implementation": "search_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        "calculate": {
+            "enabled": true,
+            "description": "Execute calculation tool",
+            "implementation": "calculate_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        "time": {
+            "enabled": true,
+            "description": "Execute time tool",
+            "implementation": "time_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        "weather": {
+            "enabled": true,
+            "description": "Execute weather tool",
+            "implementation": "weather_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        "system": {
+            "enabled": true,
+            "description": "Execute system tool to get system information",
+            "implementation": "system_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        "fileops": {
+            "enabled": true,
+            "description": "Execute file operations tool",
+            "implementation": "fileops_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    }
+}
