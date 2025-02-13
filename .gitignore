@@ -52,8 +52,3 @@ act_stats.db
 # Tools specific (excluding README)
 tools/*
 !tools/README.md
-tools_config.json
-tools/__pycache__/
-tools/*.pyc
-tools/*.pyo
-tools/*.pyd
