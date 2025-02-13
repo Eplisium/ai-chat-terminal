@@ -35,3 +35,4 @@ pprint>=0.1            # for debug printing
 sentence-transformers>=2.2.2
 psutil>=5.9.0
 pytz>=2023.3
+Pygments>=2.17.2
