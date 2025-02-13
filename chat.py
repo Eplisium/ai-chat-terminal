@@ -61,9 +61,18 @@ class OpenRouterAPI:
         except Exception as e:
             raise Exception(f"Failed to fetch OpenRouter models: {str(e)}")
     
-    def group_models_by_company(self, models):
-        """Group models by their company"""
+    def get_recent_models(self, models, limit=10):
+        """Get the most recently added models (first models from API response)"""
+        return models[:limit]
+    
+    def group_models_by_company(self, models, show_recent=False):
+        """Group models by their company with option to show recent models first"""
         company_models = defaultdict(list)
+        
+        if show_recent:
+            recent_models = self.get_recent_models(models)
+            if recent_models:
+                company_models['Recent'] = recent_models
         
         for model in models:
             model_id = model['id']
@@ -71,16 +80,21 @@ class OpenRouterAPI:
                 company = model_id.split('/')[0].title()
             else:
                 company = 'Other'
+            
+            # Don't add to company group if it's already in Recent
+            if show_recent and model in company_models['Recent']:
+                continue
+                
             company_models[company].append(model)
         
         for company in company_models:
-            company_models[company].sort(
-                key=lambda x: (
-                    not x.get('top_provider', False),
-                    x['name'].lower(),
-                    x.get('created_at', '0')
+            if company != 'Recent':  # Don't sort Recent models as they're already in order
+                company_models[company].sort(
+                    key=lambda x: (
+                        not x.get('top_provider', False),
+                        x['name'].lower()
+                    )
                 )
-            )
         
         return dict(company_models)
 

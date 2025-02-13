@@ -258,22 +258,32 @@ class AIChatApp:
                 self.console.print(f"[bold red]Error fetching models: {e}[/bold red]")
                 return None
             
-            grouped_models = self.openrouter.group_models_by_company(models)
+            # Pass show_recent=True to display recent models first
+            grouped_models = self.openrouter.group_models_by_company(models, show_recent=True)
             if not grouped_models:
                 self.console.print("[bold yellow]No models available[/bold yellow]")
                 return None
             
             companies = list(grouped_models.keys())
-            companies.sort()
+            # Make sure Recent is first if it exists
+            if 'Recent' in companies:
+                companies.remove('Recent')
+                companies.sort()
+                companies.insert(0, 'Recent')
+            else:
+                companies.sort()
             
             self.console.print(f"\n[cyan]Available Companies ({len(companies)}):[/cyan]")
             for company in companies:
                 models = grouped_models[company]
-                top_models = sum(1 for m in models if m.get('top_provider', False))
-                self.console.print(
-                    f"[cyan]{company}: {len(models)} models "
-                    f"({top_models} featured)[/cyan]"
-                )
+                if company == 'Recent':
+                    self.console.print(f"[bold cyan]{company}[/bold cyan] ({len(models)} most recently added models)")
+                else:
+                    top_models = sum(1 for m in models if m.get('top_provider', False))
+                    self.console.print(
+                        f"[cyan]{company}: {len(models)} models "
+                        f"({top_models} featured)[/cyan]"
+                    )
             
             companies.append("Back")
             
