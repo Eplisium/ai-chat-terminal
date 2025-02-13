@@ -78,21 +78,28 @@ class AIChatApp:
         """Add a model to favorites"""
         model_id = model_config['id']
         provider = model_config.get('provider', 'unknown')
-        
-        # Get the base name without provider prefix
         display_name = model_config['name']
-        if provider == 'openrouter' and display_name.startswith(f"{model_id.split('/')[0].title()}: "):
-            # Name already has provider prefix, use it as is
-            display_name = model_config['name']
-        elif provider == 'openrouter' and '/' in model_id:
-            # Add provider prefix if not present
-            company = model_id.split('/')[0].title()
-            display_name = f"{company}: {display_name}"
+        
+        # For OpenRouter models, handle provider prefix
+        if provider == 'openrouter' and '/' in model_id:
+            # If display name already has a proper format (Provider: Name), use it as is
+            if ':' in display_name and not display_name.startswith('meta-'):
+                # Keep the display name as is since it's already properly formatted
+                pass
+            else:
+                # Extract company name from model ID and format display name
+                company = model_id.split('/')[0].title()
+                # Remove any existing company/provider prefix to avoid duplication
+                if ':' in display_name:
+                    display_name = display_name.split(':', 1)[1].strip()
+                # Add company prefix
+                display_name = f"{company}: {display_name}"
         
         if not any(f['id'] == model_id for f in self.favorites):
             # For OpenRouter models, use the description from the API response
             if provider == 'openrouter':
-                description = model_config.get('description', f"{display_name} ({provider})")
+                description = model_config.get('description', f"{display_name}")
+                self.console.print(f"[green]Added {display_name} to favorites[/green]")
             else:
                 # For other providers, try to get description from models.json
                 description = None
@@ -108,7 +115,7 @@ class AIChatApp:
                     except:
                         pass
                 if not description:
-                    description = f"{display_name} ({provider})"
+                    description = display_name
             
             favorite = {
                 'id': model_id,
@@ -118,7 +125,6 @@ class AIChatApp:
             }
             self.favorites.append(favorite)
             self.save_favorites()
-            self.console.print(f"[green]Added {display_name} to favorites[/green]")
         else:
             self.console.print(f"[yellow]{display_name} is already in favorites[/yellow]")
 
@@ -252,22 +258,33 @@ class AIChatApp:
                 self.console.print(f"[bold red]Error fetching models: {e}[/bold red]")
                 return None
             
-            grouped_models = self.openrouter.group_models_by_company(models)
+            # Pass show_recent=True to display recent models first
+            grouped_models = self.openrouter.group_models_by_company(models, show_recent=True)
             if not grouped_models:
                 self.console.print("[bold yellow]No models available[/bold yellow]")
                 return None
             
             companies = list(grouped_models.keys())
-            companies.sort()
+            # Make sure Recent is first if it exists
+            if 'Recent' in companies:
+                companies.remove('Recent')
+                companies.sort()
+                companies.insert(0, 'Recent')
+            else:
+                companies.sort()
             
             self.console.print(f"\n[cyan]Available Companies ({len(companies)}):[/cyan]")
             for company in companies:
                 models = grouped_models[company]
-                top_models = sum(1 for m in models if m.get('top_provider', False))
-                self.console.print(
-                    f"[cyan]{company}: {len(models)} models "
-                    f"({top_models} featured)[/cyan]"
-                )
+                if company == 'Recent':
+                    self.console.print(f"[bold cyan]{company}[/bold cyan] ({len(models)} most recently added models)")
+                else:
+                    # Count favorited models instead of featured ones
+                    starred_models = sum(1 for m in models if any(f['id'] == m['id'] for f in self.favorites))
+                    self.console.print(
+                        f"[cyan]{company}: {len(models)} models "
+                        f"({starred_models} ★)[/cyan]"
+                    )
             
             companies.append("Back")
             
@@ -308,8 +325,9 @@ class AIChatApp:
                 except (ValueError, TypeError):
                     price_str = "Price N/A"
                 
-                featured = "⭐ " if model.get('top_provider', False) else ""
-                model_info = f"{featured}{name} (Context: {context}, {price_str})"
+                # Use star for favorited models instead of featured models
+                starred = "★ " if any(f['id'] == model['id'] for f in self.favorites) else ""
+                model_info = f"{starred}{name} (Context: {context}, {price_str})"
                 model_choices.append((model_info, model))
             
             model_choices.append(("Back", None))
@@ -348,7 +366,7 @@ class AIChatApp:
                 ("View Instructions", "view"),
                 ("Back to Main Menu", "back")
             ]
-            
+
             questions = [
                 inquirer.List('action',
                     message="Manage System Instructions",
@@ -1682,9 +1700,10 @@ class AIChatApp:
             settings = self._load_settings()
             agent_enabled = settings.get('agent', {}).get('enabled', False)
             enable_file_context = (
-                agent_enabled and
-                self.chroma_manager and
-                self.chroma_manager.vectorstore is not None
+                agent_enabled and 
+                self.chroma_manager and 
+                self.chroma_manager.vectorstore is not None and
+                self.chroma_manager.store_name is not None
             )
             
             chat = AIChat(
