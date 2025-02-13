@@ -42,7 +42,7 @@
         },
         "system": {
             "enabled": true,
-            "description": "Execute system tool to get system information\n\nArgs:\n    arguments: Dictionary containing:\n        type (str): Type of information to retrieve ('os', 'memory', 'disk', 'cpu', 'all')\n        path (str, optional): Specific path for disk information\n        \nReturns:\n    str: JSON formatted system information\n    \nRaises:\n    SystemToolError: If there's an error getting system information",
+            "description": "Execute system tool to get system information",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
@@ -52,7 +52,7 @@
         },
         "fileops": {
             "enabled": true,
-            "description": "Execute file operations tool\n\nArgs:\n    operation: Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read)\n    path: Target path\n    detailed: Get detailed information (for info operation)\n    recursive: List subdirectories recursively (for list/find operations)\n    pattern: Glob pattern for filtering (for list/find operations)\n    content: Content to write (for write operation)\n    destination: Destination path (for copy/move operations)\n    mkdir: Create directory instead of file (for create operation)\n    start_line: Start line number for read operation (1-based, inclusive)\n    end_line: End line number for read operation (1-based, inclusive)",
+            "description": "Execute file operations tool",
             "implementation": "fileops_tool.py",
             "parameters": {
                 "type": "object",
@@ -62,7 +62,7 @@
         },
         "scrape": {
             "enabled": true,
-            "description": "Scrape a webpage using local Firecrawl instance and return the content in specified format.\n\n:param url: The URL to scrape (must start with http:// or https://)\n:param format: Content format to return (markdown, html, links, or metadata)\n:param wait_for: Time to wait for page load in milliseconds (default: 5000)\n:param block_media: Whether to block media loading (default: True)\n:return: The scraped content in requested format or error message",
+            "description": "Scrape a webpage using local Firecrawl instance",
             "implementation": "scrape_tool.py",
             "parameters": {
                 "type": "object",
