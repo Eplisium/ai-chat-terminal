@@ -279,10 +279,11 @@ class AIChatApp:
                 if company == 'Recent':
                     self.console.print(f"[bold cyan]{company}[/bold cyan] ({len(models)} most recently added models)")
                 else:
-                    top_models = sum(1 for m in models if m.get('top_provider', False))
+                    # Count favorited models instead of featured ones
+                    starred_models = sum(1 for m in models if any(f['id'] == m['id'] for f in self.favorites))
                     self.console.print(
                         f"[cyan]{company}: {len(models)} models "
-                        f"({top_models} featured)[/cyan]"
+                        f"({starred_models} ★)[/cyan]"
                     )
             
             companies.append("Back")
@@ -324,8 +325,9 @@ class AIChatApp:
                 except (ValueError, TypeError):
                     price_str = "Price N/A"
                 
-                featured = "⭐ " if model.get('top_provider', False) else ""
-                model_info = f"{featured}{name} (Context: {context}, {price_str})"
+                # Use star for favorited models instead of featured models
+                starred = "★ " if any(f['id'] == model['id'] for f in self.favorites) else ""
+                model_info = f"{starred}{name} (Context: {context}, {price_str})"
                 model_choices.append((model_info, model))
             
             model_choices.append(("Back", None))

@@ -89,12 +89,7 @@ class OpenRouterAPI:
         
         for company in company_models:
             if company != 'Recent':  # Don't sort Recent models as they're already in order
-                company_models[company].sort(
-                    key=lambda x: (
-                        not x.get('top_provider', False),
-                        x['name'].lower()
-                    )
-                )
+                company_models[company].sort(key=lambda x: x['name'].lower())
         
         return dict(company_models)
 
