@@ -13,14 +13,14 @@
 ## 📑 Table of Contents
 - [Key Features](#-key-features)
   - [AI Integration](#-ai-integration)
-  - [Agent System](#-agent-system)
+  - [RAG System](#-rag-system)
   - [Document Support](#-document-support)
   - [Chat Interface](#-chat-interface)
   - [Chat History](#-chat-history)
 - [Getting Started](#-getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Agent Setup](#agent-setup)
+  - [RAG Setup](#rag-setup)
 - [Usage](#-usage)
 - [License](#-license)
 - [Forking the Repository](#-forking-the-repository)
@@ -40,7 +40,7 @@
   - Context length optimization
   - Real-time pricing display
 
-### 🧠 Agent System
+### 🧠 RAG System
 - **Context-Aware Intelligence**
   - Semantic codebase search
   - Auto file indexing & embedding
@@ -61,7 +61,7 @@
   | text-embedding-ada-002 | 1536 | Legacy support |
 
 - **Provider Support**
-  | Provider | Agent Support | Mode |
+  | Provider | RAG Support | Mode |
   |----------|--------------|------|
   | OpenRouter | ✅ | Full functionality |
   | OpenAI | ✅ | Full functionality |
@@ -108,7 +108,7 @@
 - **Saved Information**
   - Model details (name, ID, provider)
   - System instruction used
-  - Agent store and embedding model (if enabled)
+  - RAG store and embedding model (if enabled)
   - Total tokens and cost
   - Full conversation history
   - Session duration
@@ -146,11 +146,11 @@
    OPENROUTER_API_KEY=your_openrouter_key
    ```
 
-### Agent Setup
+### RAG Setup
 
-1. **Enable Agent**
+1. **Enable RAG**
    - Open AI Settings menu
-   - Toggle Agent status
+   - Toggle RAG status
    - Create/select vector store
 
 2. **Configure Store**
@@ -184,7 +184,7 @@ The interface provides:
 - Model management (⭐ for favorites)
 - System instruction configuration
 - Settings customization
-- Agent configuration
+- RAG configuration
 
 ## 📝 License
 

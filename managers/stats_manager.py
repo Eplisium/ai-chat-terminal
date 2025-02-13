@@ -587,4 +587,27 @@ class StatsManager:
         else:
             main_table.add_row("Last 7 Days", "No data available")
 
-        return main_table 
+        return main_table
+
+    def clear_db(self):
+        """Clear and reinitialize the statistics database"""
+        try:
+            # Close any existing connections
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Drop all tables
+                cursor.execute("DROP TABLE IF EXISTS model_usage")
+                cursor.execute("DROP TABLE IF EXISTS chat_stats")
+                cursor.execute("DROP TABLE IF EXISTS chat_sessions")
+                cursor.execute("DROP TABLE IF EXISTS instruction_usage")
+                
+                conn.commit()
+            
+            # Reinitialize the database with fresh tables
+            self._init_db()
+            self.logger.info("Statistics database cleared and reinitialized")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error clearing database: {e}")
+            return False 

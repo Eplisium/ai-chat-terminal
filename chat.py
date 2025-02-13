@@ -1,5 +1,7 @@
 from imports import *
 from utils import log_api_response, encode_image_to_base64, get_image_mime_type, read_document_content, sanitize_path
+import re
+import glob
 
 def get_openrouter_headers(api_key):
     """Get required headers for OpenRouter API"""
@@ -178,48 +180,94 @@ class AIChat:
             self.logger.debug(f"Initializing OpenAI client with API key: {mask_key(api_key)}")
             self.client = OpenAI(api_key=api_key)
 
+    def _sanitize_path(self, path):
+        """Sanitize file/directory path by handling quotes and normalizing path separators"""
+        try:
+            # Remove any surrounding quotes (both single and double)
+            path = path.strip()
+            if (path.startswith('"') and path.endswith('"')) or \
+               (path.startswith("'") and path.endswith("'")):
+                path = path[1:-1]
+            
+            # Handle Windows paths with escaped backslashes
+            if '\\\\' in path:
+                path = path.replace('\\\\', '\\')
+            
+            # Convert forward slashes to backslashes on Windows
+            if os.name == 'nt':
+                path = path.replace('/', '\\')
+            
+            # Normalize path separators for the current OS
+            path = os.path.normpath(path)
+            
+            # Make path absolute if relative
+            if not os.path.isabs(path):
+                path = os.path.join(os.getcwd(), path)
+            
+            # Ensure Windows drive letter is properly cased
+            if os.name == 'nt' and len(path) > 1 and path[1] == ':':
+                path = path[0].upper() + path[1:]
+            
+            return path
+        except Exception as e:
+            self.logger.error(f"Error sanitizing path: {e}", exc_info=True)
+            return path
+
+    def _extract_path_from_reference(self, reference):
+        """Extract path from a reference, handling Windows drive letters correctly"""
+        try:
+            # Split only on the first colon that's not part of a Windows drive letter
+            parts = reference.split(':', 1)
+            if len(parts) < 2:
+                return None, reference
+            
+            ref_type = parts[0].strip()
+            
+            # Handle Windows drive letters (e.g., C:)
+            remaining = parts[1]
+            if len(remaining) >= 2 and remaining[1] == ':':
+                # This is a Windows path with drive letter
+                drive = remaining[0]
+                path = remaining[1:]  # Include the : and everything after
+                return ref_type, drive + path
+            
+            return ref_type, remaining.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting path from reference: {e}", exc_info=True)
+            return None, reference
+
     def _process_file_reference(self, file_ref):
         """Process a file reference and return its contents"""
         try:
-            # Remove [[ and ]] and file: prefix
-            file_path = file_ref.strip('[]').replace('file:', '').strip()
-            
-            # Remove quotes if present
-            if (file_path.startswith('"') and file_path.endswith('"')) or \
-               (file_path.startswith("'") and file_path.endswith("'")):
-                file_path = file_path[1:-1]
-            
-            # Make path absolute if relative
-            if not os.path.isabs(file_path):
-                file_path = os.path.join(os.getcwd(), file_path)
+            # Sanitize and normalize the path
+            file_path = self._sanitize_path(file_ref)
             
             # Check if file exists
             if not os.path.exists(file_path):
                 return False, f"File not found: {file_path}"
             
-            # Read file content based on extension
-            success, content = read_document_content(file_path)
-            if success:
-                return True, f"Contents of {os.path.basename(file_path)}:\n\n{content}"
-            else:
-                return False, content
+            if not os.path.isfile(file_path):
+                return False, f"Not a directory: {file_path}"
+            
+            # Read file contents
+            try:
+                success, content = read_document_content(file_path)
+                if success:
+                    return True, f"Contents of file {os.path.basename(file_path)}:\n```\n{content}\n```"
+                else:
+                    return False, f"Error reading file: {content}"
+            except Exception as e:
+                return False, f"Error reading file: {str(e)}"
+                
         except Exception as e:
-            return False, f"Error reading file: {str(e)}"
+            return False, f"Error processing file: {str(e)}"
 
     def _process_directory_reference(self, dir_ref):
         """Process a directory reference and return its contents"""
         try:
-            # Remove [[ and ]] and dir: prefix
-            dir_path = dir_ref.strip('[]').replace('dir:', '').strip()
-            
-            # Remove quotes if present
-            if (dir_path.startswith('"') and dir_path.endswith('"')) or \
-               (dir_path.startswith("'") and dir_path.endswith("'")):
-                dir_path = dir_path[1:-1]
-            
-            # Make path absolute if relative
-            if not os.path.isabs(dir_path):
-                dir_path = os.path.join(os.getcwd(), dir_path)
+            # Sanitize and normalize the path
+            dir_path = self._sanitize_path(dir_ref)
             
             # Check if directory exists
             if not os.path.exists(dir_path):
@@ -257,9 +305,100 @@ class AIChat:
         except Exception as e:
             return False, f"Error processing directory: {str(e)}"
 
+    def _preprocess_message(self, message):
+        """Preprocess message to handle file, directory, and image references"""
+        try:
+            if not isinstance(message, str):
+                return message
+
+            # Regular expression to find all [[...]] references
+            pattern = r'\[\[(.*?)\]\]'
+            matches = re.findall(pattern, message)
+            processed_message = message
+
+            for match in matches:
+                reference = match.strip()
+                if not reference:
+                    continue
+
+                # Extract type and path using the new method
+                ref_type, ref_path = self._extract_path_from_reference(reference)
+                if not ref_type:
+                    continue
+                
+                if ref_type == 'file':
+                    success, content = self._process_file_reference(ref_path)
+                    if success:
+                        processed_message = processed_message.replace(f"[[{reference}]]", content)
+                    else:
+                        processed_message = processed_message.replace(f"[[{reference}]]", f"[Error: {content}]")
+                
+                elif ref_type == 'dir':
+                    success, content = self._process_directory_reference(ref_path)
+                    if success:
+                        processed_message = processed_message.replace(f"[[{reference}]]", content)
+                    else:
+                        processed_message = processed_message.replace(f"[[{reference}]]", f"[Error: {content}]")
+                
+                elif ref_type == 'img':
+                    try:
+                        # Sanitize and normalize the path
+                        img_path = self._sanitize_path(ref_path)
+                        # Handle both local files and URLs
+                        success, base64_data = encode_image_to_base64(img_path)
+                        if success:
+                            mime_type = get_image_mime_type(img_path)
+                            data_url = f"data:{mime_type};base64,{base64_data}"
+                            # Replace the reference with a list containing text and image parts
+                            return [
+                                {"type": "text", "text": message.replace(f"[[{reference}]]", "")},
+                                {"type": "image_url", "image_url": {"url": data_url}}
+                            ]
+                        else:
+                            processed_message = processed_message.replace(f"[[{reference}]]", f"[Error loading image: {base64_data}]")
+                    except Exception as e:
+                        processed_message = processed_message.replace(f"[[{reference}]]", f"[Error processing image: {str(e)}]")
+                
+                elif ref_type == 'codebase':
+                    try:
+                        # Sanitize and normalize the path
+                        code_path = self._sanitize_path(ref_path)
+                        # Use glob to find matching files
+                        matching_files = glob.glob(code_path, recursive=True)
+                        if not matching_files:
+                            processed_message = processed_message.replace(f"[[{reference}]]", f"[No files found matching: {code_path}]")
+                            continue
+
+                        # Process each file
+                        contents = []
+                        for file_path in matching_files[:5]:  # Limit to first 5 files to avoid token limits
+                            if os.path.isfile(file_path):
+                                success, content = read_document_content(file_path)
+                                if success:
+                                    contents.append(f"File: {file_path}\n```\n{content}\n```")
+                        
+                        if contents:
+                            replacement = "Contents of matching files:\n\n" + "\n\n".join(contents)
+                            if len(matching_files) > 5:
+                                replacement += f"\n\n[Note: Showing first 5 of {len(matching_files)} matching files]"
+                            processed_message = processed_message.replace(f"[[{reference}]]", replacement)
+                        else:
+                            processed_message = processed_message.replace(f"[[{reference}]]", "[No readable files found]")
+                    except Exception as e:
+                        processed_message = processed_message.replace(f"[[{reference}]]", f"[Error processing codebase: {str(e)}]")
+
+            return processed_message
+
+        except Exception as e:
+            self.logger.error(f"Error preprocessing message: {e}", exc_info=True)
+            return message
+
     def send_message(self, user_input):
         """Send a message to the AI model and get the response"""
         try:
+            # Preprocess the message to handle file/dir/img references
+            processed_input = self._preprocess_message(user_input)
+
             # Process file context if available
             if self.chroma_manager and self.chroma_manager.vectorstore:
                 relevant_context = self.chroma_manager.search_context(user_input)
@@ -274,8 +413,8 @@ class AIChat:
             else:
                 messages = self.messages.copy()
 
-            # Add user message
-            current_message = {"role": "user", "content": user_input}
+            # Add user message with processed content
+            current_message = {"role": "user", "content": processed_input}
             messages.append(current_message)
             self.messages.append(current_message)
             
@@ -998,11 +1137,11 @@ class AIChat:
                     "total_cost": total_cost
                 }
 
-            # Add agent information if available
-            if self.chroma_manager and self.chroma_manager.vectorstore:
+            # Add RAG information if available
+            if self.chroma_manager and self.chroma_manager.store_name:
                 chat_data["agent"] = {
                     "store": self.chroma_manager.store_name,
-                    "embedding_model": self.chroma_manager.embedding_model_name
+                    "model": self.chroma_manager.embedding_model_name
                 }
 
             with open(json_filepath, 'w', encoding='utf-8') as f:
@@ -1028,8 +1167,8 @@ class AIChat:
                     else:
                         f.write("Total Cost: Free\n")
 
-                if self.chroma_manager and self.chroma_manager.vectorstore:
-                    f.write(f"Agent Store: {self.chroma_manager.store_name}\n")
+                if self.chroma_manager and self.chroma_manager.store_name:
+                    f.write(f"RAG Store: {self.chroma_manager.store_name}\n")
                     f.write(f"Embedding Model: {self.chroma_manager.embedding_model_name}\n")
 
                 f.write("="*80 + "\n\n")
@@ -1105,10 +1244,10 @@ class AIChat:
             # Get colors from settings
             colors = self._get_colors()
             
-            # Get agent status if enabled
+            # Get RAG status if enabled
             agent_status = ""
-            if self.chroma_manager and self.chroma_manager.vectorstore and self.chroma_manager.store_name:
-                agent_status = f" [bold cyan]〈Agent Store: {self.chroma_manager.store_name}〉[/]"
+            if self.chroma_manager and self.chroma_manager.store_name:
+                agent_status = f" [bold cyan]〈RAG Store: {self.chroma_manager.store_name}〉[/]"
             
             welcome_text = (
                 f"{logo}\n"
@@ -1409,13 +1548,13 @@ class AIChat:
         else:
             usage_info.append("  No token usage data available")
 
-        # Add agent information if available
+        # Add RAG information if available
         agent_info = []
-        if self.chroma_manager and self.chroma_manager.vectorstore:
+        if self.chroma_manager and self.chroma_manager.store_name:
             agent_info.extend([
-                "\n[bold cyan]Agent Information:[/bold cyan]",
-                f"  Store: {self.chroma_manager.store_name}",
-                f"  Embedding Model: {self.chroma_manager.embedding_model_name}"
+                "\n[bold cyan]RAG Information:[/bold cyan]",
+                f"Store: {self.chroma_manager.store_name}",
+                f"Embedding Model: {self.chroma_manager.embedding_model_name}"
             ])
 
         # Combine all sections
