@@ -1592,7 +1592,12 @@ class AIChatApp:
                 elif answer['provider'] == "openai" and openai_available:
                     # Filter OpenAI models
                     openai_models = [m for m in self.models_config if m.get('provider', '').lower() == 'openai']
-                    model_choices = [(f"{m['name']} - {m.get('description', 'No description')}", m) for m in openai_models]
+                    model_choices = []
+                    for m in openai_models:
+                        # Check if model is in favorites
+                        is_favorite = any(f['id'] == m['id'] for f in self.favorites)
+                        star = "★ " if is_favorite else ""
+                        model_choices.append((f"{star}{m['name']} - {m.get('description', 'No description')}", m))
                     model_choices.append(("Back", None))
                     
                     model_question = [
@@ -1615,7 +1620,12 @@ class AIChatApp:
                 elif answer['provider'] == "anthropic" and anthropic_available:
                     # Filter Anthropic models
                     anthropic_models = [m for m in self.models_config if m.get('provider', '').lower() == 'anthropic']
-                    model_choices = [(f"{m['name']} - {m.get('description', 'No description')}", m) for m in anthropic_models]
+                    model_choices = []
+                    for m in anthropic_models:
+                        # Check if model is in favorites
+                        is_favorite = any(f['id'] == m['id'] for f in self.favorites)
+                        star = "★ " if is_favorite else ""
+                        model_choices.append((f"{star}{m['name']} - {m.get('description', 'No description')}", m))
                     model_choices.append(("Back", None))
                     
                     model_question = [
