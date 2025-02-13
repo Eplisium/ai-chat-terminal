@@ -42,12 +42,24 @@
         },
         "system": {
             "enabled": true,
-            "description": "Execute system tool to get system information\n\nArgs:\n    arguments: Dictionary containing:\n        type (str): Type of information to retrieve ('os', 'memory', 'disk', 'cpu', 'all')\n        path (str, optional): Specific path for disk information\n        \nReturns:\n    str: JSON formatted system information\n    \nRaises:\n    SystemToolError: If there's an error getting system information",
+            "description": "Execute system tool to get system information",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "Type of information to retrieve",
+                        "enum": ["os", "memory", "disk", "cpu", "all"],
+                        "default": "all"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Specific path for disk information (optional)",
+                        "optional": true
+                    }
+                },
+                "required": ["type"]
             }
         },
         "fileops": {
@@ -58,6 +70,36 @@
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        },
+        "scrape": {
+            "enabled": true,
+            "description": "Scrape a webpage using local Firecrawl instance and return the content in specified format",
+            "implementation": "scrape_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to scrape (must start with http:// or https://)"
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Content format to return (markdown, html, links, or metadata)",
+                        "enum": ["markdown", "html", "links", "metadata"]
+                    },
+                    "wait_for": {
+                        "type": "integer",
+                        "description": "Time to wait for page load in milliseconds",
+                        "default": 5000
+                    },
+                    "block_media": {
+                        "type": "boolean",
+                        "description": "Whether to block media loading",
+                        "default": true
+                    }
+                },
+                "required": ["url"]
             }
         }
     }
