@@ -42,7 +42,7 @@
         },
         "system": {
             "enabled": true,
-            "description": "Execute system tool to get system information",
+            "description": "Execute system tool to get system information\n\nArgs:\n    arguments: Dictionary containing:\n        type (str): Type of information to retrieve ('os', 'memory', 'disk', 'cpu', 'all')\n        path (str, optional): Specific path for disk information\n        \nReturns:\n    str: JSON formatted system information\n    \nRaises:\n    SystemToolError: If there's an error getting system information",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
