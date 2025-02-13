@@ -81,10 +81,6 @@ class OpenRouterAPI:
             else:
                 company = 'Other'
             
-            # Don't add to company group if it's already in Recent
-            if show_recent and model in company_models['Recent']:
-                continue
-                
             company_models[company].append(model)
         
         for company in company_models:
