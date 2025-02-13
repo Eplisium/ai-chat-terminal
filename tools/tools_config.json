@@ -22,11 +22,16 @@
         },
         "time": {
             "enabled": true,
-            "description": "Execute time tool",
+            "description": "Execute time tool to get current time in specified timezone",
             "implementation": "time_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "Timezone name from pytz database (e.g., 'UTC', 'America/New_York', 'Europe/London')"
+                    }
+                },
                 "required": []
             }
         },
