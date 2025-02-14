@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB max file size for safety
 MAX_SEARCH_RESULTS = 100
 BINARY_EXTENSIONS = {'.exe', '.dll', '.bin', '.dat', '.db', '.mdb', '.accdb', '.iso'}
-TEXT_EXTENSIONS = {'.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.log', '.ini', '.cfg', '.conf'}
+TEXT_EXTENSIONS = {'.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.log', '.ini', '.cfg', '.conf', '.bat', '.markdown'}
 
 class FileSystemError(Exception):
     """Custom exception for filesystem operations"""

@@ -228,7 +228,7 @@
         },
         "x_post": {
             "enabled": true,
-            "description": "Post a tweet to X (Twitter) using your account credentials.",
+            "description": "Post a tweet to X (Twitter) using your account credentials. Requires X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, and X_ACCESS_TOKEN_SECRET environment variables to be set.",
             "implementation": "x_tool.py",
             "parameters": {
                 "type": "object",
@@ -241,16 +241,6 @@
                 "required": [
                     "text"
                 ]
-            }
-        },
-        "x": {
-            "enabled": true,
-            "description": "Post a tweet to X (Twitter).\n\n:param text: The text content of the tweet (max 280 characters)\n:return: Success message with tweet ID or error message",
-            "implementation": "x_tool.py",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
             }
         }
     }
