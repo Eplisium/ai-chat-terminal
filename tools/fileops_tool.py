@@ -2,11 +2,166 @@ import os
 import json
 import shutil
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple, Iterator
 from pathlib import Path
 import mimetypes
 import pygments
-from pygments import lexers, formatters, util
+from pygments.lexers import get_lexer_for_filename
+from pygments.formatters import HtmlFormatter
+import mmap
+from io import StringIO
+import itertools
+import hashlib
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+import magic  # python-magic for better file type detection
+import chardet  # for encoding detection
+
+@dataclass
+class FileInsight:
+    """Class for storing enhanced file metadata and insights"""
+    path: str
+    name: str
+    size: int
+    created: datetime
+    modified: datetime
+    file_type: str
+    mime_type: str
+    checksum: str
+    encoding: Optional[str] = None
+    is_binary: bool = False
+    line_count: Optional[int] = None
+    preview: Optional[str] = None
+    metadata: Dict = None
+
+def get_file_checksum(file_path: str, chunk_size: int = 8192) -> str:
+    """Calculate file checksum using SHA-256"""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+def get_file_insight(path: str) -> FileInsight:
+    """Get comprehensive file insights including metadata and preview"""
+    try:
+        stat = os.stat(path)
+        mime = magic.Magic(mime=True)
+        mime_type = mime.from_file(path)
+        
+        insight = FileInsight(
+            path=path,
+            name=os.path.basename(path),
+            size=stat.st_size,
+            created=datetime.fromtimestamp(stat.st_ctime),
+            modified=datetime.fromtimestamp(stat.st_mtime),
+            file_type=os.path.splitext(path)[1].lower(),
+            mime_type=mime_type,
+            checksum=get_file_checksum(path),
+            metadata={}
+        )
+        
+        # Determine if file is binary
+        insight.is_binary = mime_type.startswith('application/') and 'text' not in mime_type.lower()
+        
+        # Handle text files
+        if not insight.is_binary:
+            try:
+                # Try to detect encoding
+                with open(path, 'rb') as f:
+                    raw = f.read(4096)
+                    result = chardet.detect(raw)
+                    insight.encoding = result['encoding']
+                
+                # Get line count and preview for text files
+                with open(path, 'r', encoding=insight.encoding) as f:
+                    lines = f.readlines()
+                    insight.line_count = len(lines)
+                    insight.preview = ''.join(lines[:10])  # First 10 lines as preview
+                    
+            except Exception:
+                insight.encoding = None
+                insight.preview = None
+        
+        # Extract additional metadata based on file type
+        if insight.file_type in {'.jpg', '.jpeg', '.png', '.gif'}:
+            from PIL import Image
+            with Image.open(path) as img:
+                insight.metadata['dimensions'] = img.size
+                insight.metadata['format'] = img.format
+                insight.metadata['mode'] = img.mode
+                
+        elif insight.file_type in {'.pdf'}:
+            import PyPDF2
+            with open(path, 'rb') as f:
+                pdf = PyPDF2.PdfReader(f)
+                insight.metadata['pages'] = len(pdf.pages)
+                insight.metadata['title'] = pdf.metadata.get('/Title', '')
+                insight.metadata['author'] = pdf.metadata.get('/Author', '')
+                
+        elif insight.file_type in {'.docx', '.xlsx', '.pptx'}:
+            from docx import Document
+            doc = Document(path)
+            insight.metadata['paragraphs'] = len(doc.paragraphs)
+            insight.metadata['sections'] = len(doc.sections)
+            
+        return insight
+        
+    except Exception as e:
+        return FileInsight(
+            path=path,
+            name=os.path.basename(path),
+            size=0,
+            created=datetime.now(),
+            modified=datetime.now(),
+            file_type='unknown',
+            mime_type='unknown',
+            checksum='',
+            metadata={'error': str(e)}
+        )
+
+def analyze_directory(directory: str, max_depth: int = None, exclude_patterns: List[str] = None) -> List[FileInsight]:
+    """Analyze all files in a directory recursively"""
+    insights = []
+    exclude_patterns = exclude_patterns or []
+    
+    def should_exclude(path: str) -> bool:
+        return any(pattern in path for pattern in exclude_patterns)
+    
+    def process_file(file_path: str, current_depth: int) -> Optional[FileInsight]:
+        if should_exclude(file_path):
+            return None
+        try:
+            return get_file_insight(file_path)
+        except Exception:
+            return None
+            
+    def walk_directory(path: str, current_depth: int = 0):
+        if max_depth is not None and current_depth > max_depth:
+            return
+            
+        try:
+            with ThreadPoolExecutor() as executor:
+                for root, dirs, files in os.walk(path):
+                    if should_exclude(root):
+                        continue
+                        
+                    file_paths = [os.path.join(root, f) for f in files]
+                    futures = [executor.submit(process_file, fp, current_depth) for fp in file_paths]
+                    
+                    for future in futures:
+                        insight = future.result()
+                        if insight:
+                            insights.append(insight)
+                            
+                    for dir_name in dirs:
+                        dir_path = os.path.join(root, dir_name)
+                        walk_directory(dir_path, current_depth + 1)
+        except Exception:
+            pass
+            
+    walk_directory(directory)
+    return insights
 
 def format_size(size_bytes: int) -> str:
     """Convert bytes to human readable format"""
@@ -185,75 +340,151 @@ def format_code_with_highlighting(content: str, language: str) -> str:
     try:
         # Get lexer for language
         try:
-            lexer = lexers.get_lexer_by_name(language)
-        except util.ClassNotFound:
-            lexer = lexers.guess_lexer(content)
+            lexer = get_lexer_for_filename(language)
+        except Exception:
+            lexer = get_lexer_for_filename('text')
             
         # Format with terminal colors
-        formatter = formatters.TerminalFormatter()
+        formatter = HtmlFormatter()
         highlighted = pygments.highlight(content, lexer, formatter)
         
         return highlighted
     except:
         return content
 
-def read_file_content(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
-    """Read file content with optional line range
+def read_file_chunks(file_obj, chunk_size: int = 1024 * 1024) -> Iterator[str]:
+    """Read a file in chunks to handle large files efficiently.
     
     Args:
-        path: Path to file
-        start_line: Start line number (1-based, inclusive)
-        end_line: End line number (1-based, inclusive)
-    """
-    try:
-        # Check if file exists
-        if not os.path.exists(path):
-            return f"File not found: {path}"
+        file_obj: File object to read from
+        chunk_size: Size of each chunk in bytes (default 1MB)
         
-        if not os.path.isfile(path):
-            return f"Not a file: {path}"
+    Yields:
+        str: Chunks of the file content
+    """
+    while True:
+        chunk = file_obj.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
+
+def read_file_content(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, 
+                     chunk_size: int = 1024 * 1024, include_insights: bool = False) -> Union[str, Tuple[str, FileInsight]]:
+    """Enhanced read file content with optional insights"""
+    content = None
+    insight = None
+    
+    try:
+        if include_insights:
+            insight = get_file_insight(path)
             
-        # Read file content
-        with open(path, 'r', encoding='utf-8') as f:
-            if start_line is None and end_line is None:
-                content = f.read()
-                return f"Contents of file {os.path.basename(path)}:\n```\n{content}\n```"
+            # Use detected encoding if available
+            if insight.encoding:
+                encoding = insight.encoding
+            else:
+                encoding = 'utf-8'
                 
-            lines = f.readlines()
-            total_lines = len(lines)
+            # Handle binary files appropriately
+            if insight.is_binary:
+                return (f"[Binary file detected: {insight.file_type}] - Use appropriate binary file handler", insight)
+        else:
+            encoding = 'utf-8'
             
-            # Adjust line numbers
-            if start_line is None:
-                start_line = 1
-            if end_line is None:
-                end_line = total_lines
+        # Get file size
+        file_size = os.path.getsize(path)
+        
+        # For large files (>50MB), use memory mapping or chunked reading
+        if file_size > 50 * 1024 * 1024:  # 50MB threshold
+            if start_line is not None or end_line is not None:
+                content = read_large_file_lines(path, start_line, end_line, chunk_size)
+            else:
+                try:
+                    with open(path, 'rb') as f:
+                        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                            content = mm.read().decode(encoding, errors='replace')
+                except Exception:
+                    content = ''.join(chunked_read_generator(path, chunk_size))
+        else:
+            # Handle regular text-based files
+            encodings = [encoding, 'utf-16', 'ascii', 'latin1']
+            
+            for enc in encodings:
+                try:
+                    with open(path, 'r', encoding=enc) as f:
+                        if start_line is not None and end_line is not None:
+                            lines = f.readlines()
+                            start_idx = max(0, start_line)
+                            end_idx = min(len(lines), end_line + 1)
+                            content = ''.join(lines[start_idx:end_idx])
+                        else:
+                            content = f.read()
+                        break
+                except UnicodeDecodeError:
+                    continue
+                    
+            # If no encoding worked, try binary mode as last resort
+            if content is None:
+                with open(path, 'rb') as f:
+                    content = f.read().decode('utf-8', errors='replace')
+                    
+        if include_insights:
+            return (content, insight)
+        return content
                 
-            # Convert to 0-based indexing
-            start_idx = max(0, start_line - 1)
-            end_idx = min(total_lines, end_line)
-            
-            # Get the requested lines
-            content_lines = lines[start_idx:end_idx]
-            content = ''.join(content_lines)
-            
-            # Format output with line numbers and context
-            output = [f"Contents of file {os.path.basename(path)} (lines {start_line}-{end_line}):"]
-            output.append("```")
-            
-            if start_line > 1:
-                output.append(f"... {start_line-1} lines before ...")
-            
-            for i, line in enumerate(content_lines, start=start_line):
-                output.append(f"{i:4d} | {line.rstrip()}")
-                
-            if end_line < total_lines:
-                output.append(f"... {total_lines-end_line} lines after ...")
-                
-            output.append("```")
-            return "\n".join(output)
-            
     except Exception as e:
-        return f"Error reading file: {str(e)}"
+        error_msg = f"Error reading file: {str(e)}"
+        if include_insights:
+            return (error_msg, insight)
+        return error_msg
+
+def read_large_file_lines(path: str, start_line: Optional[int], end_line: Optional[int], 
+                         chunk_size: int) -> str:
+    """Read specific lines from a large file efficiently.
+    
+    Args:
+        path: Path to the file
+        start_line: Starting line number
+        end_line: Ending line number
+        chunk_size: Size of chunks to read
+        
+    Returns:
+        str: Requested lines from the file
+    """
+    if start_line is None:
+        start_line = 0
+    if end_line is None:
+        end_line = float('inf')
+        
+    buffer = StringIO()
+    current_line = 0
+    
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        for chunk in read_file_chunks(f, chunk_size):
+            lines = chunk.splitlines(True)
+            for line in lines:
+                if current_line >= start_line and current_line <= end_line:
+                    buffer.write(line)
+                current_line += 1
+                if current_line > end_line:
+                    break
+            if current_line > end_line:
+                break
+                
+    return buffer.getvalue()
+
+def chunked_read_generator(path: str, chunk_size: int) -> Iterator[str]:
+    """Generate chunks of file content for very large files.
+    
+    Args:
+        path: Path to the file
+        chunk_size: Size of chunks to read
+        
+    Yields:
+        str: Chunks of the file content
+    """
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        for chunk in read_file_chunks(f, chunk_size):
+            yield chunk
 
 def execute(arguments: Dict) -> str:
     """Execute file operations tool

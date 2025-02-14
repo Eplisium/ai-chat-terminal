@@ -2,94 +2,207 @@
     "tools": {
         "search": {
             "enabled": true,
-            "description": "Execute search tool",
+            "description": "Search the web and return formatted results.",
             "implementation": "search_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": "Number of results",
+                        "default": 5,
+                        "minimum": 1
+                    }
+                },
+                "required": ["query"]
             }
         },
         "calculate": {
             "enabled": true,
-            "description": "Execute calculation tool",
+            "description": "Evaluate mathematical expressions safely.",
             "implementation": "calculate_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Math expression (+, -, *, /, **)"
+                    }
+                },
+                "required": ["expression"]
             }
         },
         "time": {
             "enabled": true,
-            "description": "Execute time tool\n\nArgs:\n    arguments (dict): Dictionary containing the timezone parameter\n        timezone (str): Timezone name (e.g., 'America/New_York', 'Europe/London')\n        \nReturns:\n    str: Formatted current time string or error message",
+            "description": "Get current time in specified timezone.",
             "implementation": "time_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "Timezone (e.g., 'America/New_York')",
+                        "default": "UTC"
+                    }
+                },
                 "required": []
             }
         },
         "weather": {
             "enabled": true,
-            "description": "Execute weather tool",
+            "description": "Get current weather for a location.",
             "implementation": "weather_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "Location name"
+                    },
+                    "units": {
+                        "type": "string",
+                        "description": "Units system",
+                        "enum": ["metric", "imperial"],
+                        "default": "metric"
+                    }
+                },
+                "required": ["location"]
             }
         },
         "system": {
             "enabled": true,
-            "description": "Execute system tool to get system information\n\nArgs:\n    arguments: Dictionary containing:\n        type (str): Type of information to retrieve ('os', 'memory', 'disk', 'cpu', 'all')\n        path (str, optional): Specific path for disk information\n        \nReturns:\n    str: JSON formatted system information\n    \nRaises:\n    SystemToolError: If there's an error getting system information",
+            "description": "Get system information (OS, memory, disk, CPU).",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "Information type",
+                        "enum": ["os", "memory", "disk", "cpu", "all"],
+                        "default": "all"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Path for disk info"
+                    }
+                },
                 "required": []
             }
         },
         "fileops": {
             "enabled": true,
-            "description": "Execute file operations tool\n\nArgs:\n    operation: Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read)\n    path: Target path\n    detailed: Get detailed information (for info operation)\n    recursive: List subdirectories recursively (for list/find operations)\n    pattern: Glob pattern for filtering (for list/find operations)\n    content: Content to write (for write operation)\n    destination: Destination path (for copy/move operations)\n    mkdir: Create directory instead of file (for create operation)\n    start_line: Start line number for read operation (1-based, inclusive)\n    end_line: End line number for read operation (1-based, inclusive)",
+            "description": "Perform file operations with advanced features.",
             "implementation": "fileops_tool.py",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "Operation type",
+                        "enum": ["info", "list", "exists", "find", "size", "create", "delete", "copy", "move", "write", "read", "analyze"]
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Target path"
+                    },
+                    "detailed": {
+                        "type": "boolean",
+                        "description": "Include detailed info",
+                        "default": false
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Process subdirectories",
+                        "default": false
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "File filter pattern"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination path"
+                    },
+                    "mkdir": {
+                        "type": "boolean",
+                        "description": "Create directory",
+                        "default": false
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line (1-based)",
+                        "minimum": 1
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line (1-based)",
+                        "minimum": 1
+                    },
+                    "include_insights": {
+                        "type": "boolean",
+                        "description": "Include file insights",
+                        "default": false
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Max recursive depth",
+                        "minimum": 1
+                    },
+                    "exclude_patterns": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Patterns to exclude"
+                    },
+                    "chunk_size": {
+                        "type": "integer",
+                        "description": "Read chunk size (bytes)",
+                        "default": 1048576
+                    }
+                },
+                "required": ["operation", "path"]
             }
         },
         "scrape": {
             "enabled": true,
-            "description": "Scrape a webpage using local Firecrawl instance and return the content in specified format.\n\n:param url: The URL to scrape (must start with http:// or https://)\n:param format: Content format to return (markdown, html, links, or metadata)\n:param wait_for: Time to wait for page load in milliseconds (default: 5000)\n:param block_media: Whether to block media loading (default: True)\n:return: The scraped content in requested format or error message",
+            "description": "Scrape webpage content using Firecrawl.",
             "implementation": "scrape_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The URL to scrape (must start with http"
+                        "description": "URL to scrape"
                     },
                     "format": {
                         "type": "string",
-                        "description": "Content format to return (markdown, html, links, or metadata)"
+                        "description": "Output format",
+                        "enum": ["markdown", "html", "links", "metadata"],
+                        "default": "markdown"
                     },
                     "wait_for": {
-                        "type": "string",
-                        "description": "Time to wait for page load in milliseconds (default"
+                        "type": "integer",
+                        "description": "Page load wait time (ms)",
+                        "default": 5000,
+                        "minimum": 0
                     },
                     "block_media": {
-                        "type": "string",
-                        "description": "Whether to block media loading (default"
+                        "type": "boolean",
+                        "description": "Block media loading",
+                        "default": true
                     }
                 },
-                "required": [
-                    "url",
-                    "format",
-                    "wait_for",
-                    "block_media"
-                ]
+                "required": ["url"]
             }
         }
     }
