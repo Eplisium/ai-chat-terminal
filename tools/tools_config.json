@@ -109,65 +109,6 @@
                 "required": []
             }
         },
-        "fileops": {
-            "enabled": true,
-            "description": "Execute file operations tool for browsing and managing files",
-            "implementation": "fileops_tool.py",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "operation": {
-                        "type": "string",
-                        "description": "Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read, search)",
-                        "enum": ["info", "list", "exists", "find", "size", "create", "delete", "copy", "move", "write", "read", "search"]
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Target path for the operation"
-                    },
-                    "detailed": {
-                        "type": "boolean",
-                        "description": "Get detailed information (for info operation)",
-                        "default": false
-                    },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "List subdirectories recursively (for list/find operations)",
-                        "default": false
-                    },
-                    "pattern": {
-                        "type": "string",
-                        "description": "Glob pattern for filtering (for list/find operations)"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write (for write operation)"
-                    },
-                    "destination": {
-                        "type": "string",
-                        "description": "Destination path (for copy/move operations)"
-                    },
-                    "mkdir": {
-                        "type": "boolean",
-                        "description": "Create directory instead of file (for create operation)",
-                        "default": false
-                    },
-                    "start_line": {
-                        "type": "integer",
-                        "description": "Start line number for read operation (1-based, inclusive)"
-                    },
-                    "end_line": {
-                        "type": "integer",
-                        "description": "End line number for read operation (1-based, inclusive)"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search query for searching file contents (for search operation)"
-                    }
-                },
-                "required": ["operation", "path"]
-            }
-        },
         "scrape": {
             "enabled": true,
             "description": "Scrape webpage content using a local Firecrawl instance.",
