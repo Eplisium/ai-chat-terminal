@@ -147,6 +147,84 @@
                     "url"
                 ]
             }
+        },
+        "filesystem": {
+            "enabled": true,
+            "description": "Perform file system operations like searching and reading files across the system.",
+            "implementation": "filesystem_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "The operation to perform",
+                        "enum": [
+                            "search",
+                            "read",
+                            "info",
+                            "list",
+                            "user"
+                        ],
+                        "default": "search"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Target path for the operation (not required for 'user' operation)"
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "File pattern for search/list operations (e.g., '*.txt', '*.py')",
+                        "default": "*"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text to search for within files"
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum directory depth for search",
+                        "default": 10,
+                        "minimum": 1
+                    },
+                    "exclude_dirs": {
+                        "type": "array",
+                        "description": "List of directory names to exclude from search",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [
+                            ".git",
+                            "node_modules",
+                            "__pycache__",
+                            "venv",
+                            ".env"
+                        ]
+                    },
+                    "include_hidden": {
+                        "type": "boolean",
+                        "description": "Whether to include hidden files and directories",
+                        "default": false
+                    },
+                    "include_preview": {
+                        "type": "boolean",
+                        "description": "Whether to include content preview in file info",
+                        "default": false
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Starting line number for read operation (1-based, inclusive)",
+                        "minimum": 1
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Ending line number for read operation (1-based, inclusive)",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "operation"
+                ]
+            }
         }
     }
 }
