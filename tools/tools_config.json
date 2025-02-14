@@ -18,7 +18,9 @@
                         "minimum": 1
                     }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         },
         "calculate": {
@@ -33,7 +35,9 @@
                         "description": "The mathematical expression to evaluate (supports +, -, *, /, ** operators)"
                     }
                 },
-                "required": ["expression"]
+                "required": [
+                    "expression"
+                ]
             }
         },
         "time": {
@@ -66,11 +70,16 @@
                     "units": {
                         "type": "string",
                         "description": "The units system for temperature and measurements",
-                        "enum": ["metric", "imperial"],
+                        "enum": [
+                            "metric",
+                            "imperial"
+                        ],
                         "default": "metric"
                     }
                 },
-                "required": ["location"]
+                "required": [
+                    "location"
+                ]
             }
         },
         "system": {
@@ -83,7 +92,13 @@
                     "type": {
                         "type": "string",
                         "description": "The type of system information to retrieve",
-                        "enum": ["os", "memory", "disk", "cpu", "all"],
+                        "enum": [
+                            "os",
+                            "memory",
+                            "disk",
+                            "cpu",
+                            "all"
+                        ],
                         "default": "all"
                     },
                     "path": {
@@ -96,56 +111,58 @@
         },
         "fileops": {
             "enabled": true,
-            "description": "Perform file system operations like reading, writing, copying, and moving files.",
+            "description": "Execute file operations tool for browsing and managing files",
             "implementation": "fileops_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "description": "The file operation to perform",
-                        "enum": ["info", "list", "exists", "find", "size", "create", "delete", "copy", "move", "write", "read"]
+                        "description": "Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read, search)",
+                        "enum": ["info", "list", "exists", "find", "size", "create", "delete", "copy", "move", "write", "read", "search"]
                     },
                     "path": {
                         "type": "string",
-                        "description": "The target file or directory path"
+                        "description": "Target path for the operation"
                     },
                     "detailed": {
                         "type": "boolean",
-                        "description": "Whether to return detailed information for info operation",
+                        "description": "Get detailed information (for info operation)",
                         "default": false
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "Whether to process subdirectories recursively for list/find operations",
+                        "description": "List subdirectories recursively (for list/find operations)",
                         "default": false
                     },
                     "pattern": {
                         "type": "string",
-                        "description": "The glob pattern for filtering files in list/find operations"
+                        "description": "Glob pattern for filtering (for list/find operations)"
                     },
                     "content": {
                         "type": "string",
-                        "description": "The content to write for write operation"
+                        "description": "Content to write (for write operation)"
                     },
                     "destination": {
                         "type": "string",
-                        "description": "The destination path for copy/move operations"
+                        "description": "Destination path (for copy/move operations)"
                     },
                     "mkdir": {
                         "type": "boolean",
-                        "description": "Whether to create a directory instead of a file for create operation",
+                        "description": "Create directory instead of file (for create operation)",
                         "default": false
                     },
                     "start_line": {
                         "type": "integer",
-                        "description": "The starting line number for read operation (1-based)",
-                        "minimum": 1
+                        "description": "Start line number for read operation (1-based, inclusive)"
                     },
                     "end_line": {
                         "type": "integer",
-                        "description": "The ending line number for read operation (1-based)",
-                        "minimum": 1
+                        "description": "End line number for read operation (1-based, inclusive)"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for searching file contents (for search operation)"
                     }
                 },
                 "required": ["operation", "path"]
@@ -165,7 +182,12 @@
                     "format": {
                         "type": "string",
                         "description": "The desired format for the scraped content",
-                        "enum": ["markdown", "html", "links", "metadata"],
+                        "enum": [
+                            "markdown",
+                            "html",
+                            "links",
+                            "metadata"
+                        ],
                         "default": "markdown"
                     },
                     "wait_for": {
@@ -180,7 +202,9 @@
                         "default": true
                     }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     }

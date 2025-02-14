@@ -95,36 +95,54 @@ class ToolsManager:
     def _init_tools_config(self):
         """Initialize or load tools configuration"""
         try:
-            # Discover available tools
-            discovered_tools = self._discover_tools()
-            
             if os.path.exists(self.tools_config_file):
                 # Load existing config
                 with open(self.tools_config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    existing_tools = config.get('tools', {})
+                    self.available_tools = config.get('tools', {})
                 
-                # Update existing tools with any new ones
-                for tool_name, tool_info in discovered_tools.items():
-                    if tool_name not in existing_tools:
-                        existing_tools[tool_name] = tool_info
-                    else:
-                        # Update implementation and parameters but keep enabled status
-                        existing_tools[tool_name].update({
-                            k: v for k, v in tool_info.items() 
-                            if k not in ['enabled']
-                        })
+                # Only discover new tools if they don't exist in config
+                discovered_tools = {}
+                for filename in os.listdir(self.tools_dir):
+                    if filename.endswith('_tool.py'):
+                        tool_name = filename[:-8]  # Remove _tool.py suffix
+                        if tool_name not in self.available_tools:
+                            # Only discover this specific tool
+                            try:
+                                module_path = os.path.join(self.tools_dir, filename)
+                                spec = importlib.util.spec_from_file_location(tool_name, module_path)
+                                module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(module)
+                                
+                                if hasattr(module, 'execute'):
+                                    description = inspect.getdoc(module.execute) or f"Execute {tool_name} tool"
+                                    discovered_tools[tool_name] = {
+                                        "enabled": True,
+                                        "description": description,
+                                        "implementation": filename,
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {},
+                                            "required": []
+                                        }
+                                    }
+                            except Exception as e:
+                                self.logger.error(f"Error discovering tool {filename}: {e}")
+                                continue
+                
+                # Add newly discovered tools to config
+                self.available_tools.update(discovered_tools)
                 
                 # Remove tools that no longer exist
-                for tool_name in list(existing_tools.keys()):
-                    if tool_name not in discovered_tools:
-                        del existing_tools[tool_name]
-                
-                self.available_tools = existing_tools
+                for tool_name in list(self.available_tools.keys()):
+                    implementation = self.available_tools[tool_name].get('implementation')
+                    if implementation and not os.path.exists(os.path.join(self.tools_dir, implementation)):
+                        del self.available_tools[tool_name]
             else:
-                self.available_tools = discovered_tools
+                # If no config exists, do a full tool discovery
+                self.available_tools = self._discover_tools()
             
-            # Save updated configuration
+            # Save configuration only if it was modified
             with open(self.tools_config_file, 'w', encoding='utf-8') as f:
                 json.dump({"tools": self.available_tools}, f, indent=4)
             

@@ -16,6 +16,58 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import magic  # python-magic for better file type detection
 import chardet  # for encoding detection
+import logging
+import stat
+from functools import wraps
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='fileops.log'
+)
+logger = logging.getLogger(__name__)
+
+def log_operation(func):
+    """Decorator to log file operations"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            logger.info(f"Successfully executed {func.__name__} with args: {args}, kwargs: {kwargs}")
+            return result
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}")
+            raise
+    return wrapper
+
+def check_path_access(path: str, check_type: str = 'read') -> bool:
+    """Check if path is accessible and allowed
+    
+    Args:
+        path: Path to check
+        check_type: Type of access to check ('read', 'write', 'execute')
+    """
+    try:
+        # Convert to absolute path
+        abs_path = os.path.abspath(path)
+        
+        # Basic security checks
+        if not os.path.exists(abs_path):
+            return True  # Allow creating new files
+            
+        # Check if path is accessible
+        if check_type == 'read':
+            return os.access(abs_path, os.R_OK)
+        elif check_type == 'write':
+            return os.access(abs_path, os.W_OK)
+        elif check_type == 'execute':
+            return os.access(abs_path, os.X_OK)
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error checking path access: {str(e)}")
+        return False
 
 @dataclass
 class FileInsight:
@@ -34,6 +86,7 @@ class FileInsight:
     preview: Optional[str] = None
     metadata: Dict = None
 
+@log_operation
 def get_file_checksum(file_path: str, chunk_size: int = 8192) -> str:
     """Calculate file checksum using SHA-256"""
     sha256_hash = hashlib.sha256()
@@ -42,6 +95,7 @@ def get_file_checksum(file_path: str, chunk_size: int = 8192) -> str:
             sha256_hash.update(chunk)
     return sha256_hash.hexdigest()
 
+@log_operation
 def get_file_insight(path: str) -> FileInsight:
     """Get comprehensive file insights including metadata and preview"""
     try:
@@ -120,6 +174,7 @@ def get_file_insight(path: str) -> FileInsight:
             metadata={'error': str(e)}
         )
 
+@log_operation
 def analyze_directory(directory: str, max_depth: int = None, exclude_patterns: List[str] = None) -> List[FileInsight]:
     """Analyze all files in a directory recursively"""
     insights = []
@@ -163,6 +218,7 @@ def analyze_directory(directory: str, max_depth: int = None, exclude_patterns: L
     walk_directory(directory)
     return insights
 
+@log_operation
 def format_size(size_bytes: int) -> str:
     """Convert bytes to human readable format"""
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -171,10 +227,12 @@ def format_size(size_bytes: int) -> str:
         size_bytes /= 1024
     return f"{size_bytes:.2f} PB"
 
+@log_operation
 def format_timestamp(timestamp: float) -> str:
     """Convert timestamp to human readable format"""
     return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
+@log_operation
 def get_file_info(path: str, detailed: bool = False) -> Dict:
     """Get detailed information about a file or directory
     
@@ -230,6 +288,7 @@ def get_file_info(path: str, detailed: bool = False) -> Dict:
             'error': str(e)
         }
 
+@log_operation
 def list_directory(path: str, recursive: bool = False, pattern: str = None) -> List[Dict]:
     """List contents of a directory with optional filtering
     
@@ -266,6 +325,7 @@ def list_directory(path: str, recursive: bool = False, pattern: str = None) -> L
     except Exception as e:
         raise RuntimeError(f"Error listing directory: {str(e)}")
 
+@log_operation
 def format_list_output(items: List[Dict]) -> str:
     """Format directory listing for display"""
     if not items:
@@ -281,12 +341,14 @@ def format_list_output(items: List[Dict]) -> str:
         
     return "\n".join(output)
 
+@log_operation
 def ensure_parent_dir(path: str) -> None:
     """Ensure parent directory exists"""
     parent = os.path.dirname(path)
     if parent and not os.path.exists(parent):
         os.makedirs(parent)
 
+@log_operation
 def get_file_type(path: str) -> str:
     """Detect file type based on extension and content"""
     # Get mime type
@@ -335,6 +397,7 @@ def get_file_type(path: str) -> str:
     
     return 'binary'
 
+@log_operation
 def format_code_with_highlighting(content: str, language: str) -> str:
     """Format code with syntax highlighting"""
     try:
@@ -352,6 +415,7 @@ def format_code_with_highlighting(content: str, language: str) -> str:
     except:
         return content
 
+@log_operation
 def read_file_chunks(file_obj, chunk_size: int = 1024 * 1024) -> Iterator[str]:
     """Read a file in chunks to handle large files efficiently.
     
@@ -368,6 +432,7 @@ def read_file_chunks(file_obj, chunk_size: int = 1024 * 1024) -> Iterator[str]:
             break
         yield chunk
 
+@log_operation
 def read_file_content(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, 
                      chunk_size: int = 1024 * 1024, include_insights: bool = False) -> Union[str, Tuple[str, FileInsight]]:
     """Enhanced read file content with optional insights"""
@@ -437,6 +502,7 @@ def read_file_content(path: str, start_line: Optional[int] = None, end_line: Opt
             return (error_msg, insight)
         return error_msg
 
+@log_operation
 def read_large_file_lines(path: str, start_line: Optional[int], end_line: Optional[int], 
                          chunk_size: int) -> str:
     """Read specific lines from a large file efficiently.
@@ -472,6 +538,7 @@ def read_large_file_lines(path: str, start_line: Optional[int], end_line: Option
                 
     return buffer.getvalue()
 
+@log_operation
 def chunked_read_generator(path: str, chunk_size: int) -> Iterator[str]:
     """Generate chunks of file content for very large files.
     
@@ -486,11 +553,12 @@ def chunked_read_generator(path: str, chunk_size: int) -> Iterator[str]:
         for chunk in read_file_chunks(f, chunk_size):
             yield chunk
 
+@log_operation
 def execute(arguments: Dict) -> str:
     """Execute file operations tool
     
     Args:
-        operation: Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read)
+        operation: Operation to perform (info, list, exists, find, size, create, delete, copy, move, write, read, search)
         path: Target path
         detailed: Get detailed information (for info operation)
         recursive: List subdirectories recursively (for list/find operations)
@@ -500,6 +568,7 @@ def execute(arguments: Dict) -> str:
         mkdir: Create directory instead of file (for create operation)
         start_line: Start line number for read operation (1-based, inclusive)
         end_line: End line number for read operation (1-based, inclusive)
+        query: Search query for search operation
     """
     operation = arguments.get('operation', '').lower()
     path = arguments.get('path', '')
@@ -511,14 +580,26 @@ def execute(arguments: Dict) -> str:
     mkdir = bool(arguments.get('mkdir', False))
     start_line = arguments.get('start_line')
     end_line = arguments.get('end_line')
+    query = arguments.get('query', '')
     
     if not path:
         return "Error: No path provided"
     
-    # Normalize paths
-    path = os.path.normpath(path)
-    if destination:
-        destination = os.path.normpath(destination)
+    # Normalize and check paths
+    try:
+        path = os.path.normpath(path)
+        if destination:
+            destination = os.path.normpath(destination)
+            
+        # Check path access based on operation
+        access_type = 'write' if operation in ['create', 'delete', 'copy', 'move', 'write'] else 'read'
+        if not check_path_access(path, access_type):
+            return f"Error: Access denied to path: {path}"
+            
+        if destination and not check_path_access(destination, 'write'):
+            return f"Error: Access denied to destination: {destination}"
+    except Exception as e:
+        return f"Error with path validation: {str(e)}"
     
     try:
         if operation == 'info':
@@ -541,6 +622,37 @@ def execute(arguments: Dict) -> str:
                 return "Error: Pattern required for find operation"
             items = list_directory(path, recursive=True, pattern=pattern)
             return format_list_output(items)
+            
+        elif operation == 'search':
+            if not query:
+                return "Error: Query required for search operation"
+            results = []
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    try:
+                        file_path = os.path.join(root, file)
+                        if not os.path.exists(file_path) or not os.access(file_path, os.R_OK):
+                            continue
+                            
+                        # Get file type
+                        mime = magic.Magic(mime=True)
+                        mime_type = mime.from_file(file_path)
+                        
+                        # Only search text files
+                        if mime_type and mime_type.startswith('text/'):
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                                if query.lower() in content.lower():
+                                    results.append({
+                                        'path': file_path,
+                                        'type': 'file',
+                                        'size': os.path.getsize(file_path)
+                                    })
+                    except Exception as e:
+                        logger.error(f"Error searching file {file_path}: {str(e)}")
+                        continue
+                        
+            return format_list_output(results)
             
         elif operation == 'size':
             if not os.path.exists(path):
@@ -645,7 +757,8 @@ def execute(arguments: Dict) -> str:
                 return f"Error reading {path}: {str(e)}"
                 
         else:
-            return f"Error: Unknown operation '{operation}'. Valid operations: info, list, exists, find, size, create, delete, copy, move, write, read"
+            return f"Error: Unknown operation '{operation}'. Valid operations: info, list, exists, find, size, create, delete, copy, move, write, read, search"
             
     except Exception as e:
-        return f"Error performing {operation} on {path}: {str(e)}" 
+        logger.error(f"Error performing {operation} on {path}: {str(e)}")
+        return f"Error performing {operation} on {path}: {str(e)}"
