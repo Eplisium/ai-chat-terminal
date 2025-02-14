@@ -676,11 +676,11 @@ class AIChat:
                                 "content": initial_content,
                                 "tool_calls": [
                                     {
-                                        "id": tool_call.id,
+                                        "id": tool_call.get('id', ''),
                                         "type": "function",
                                         "function": {
-                                            "name": tool_call.function.name,
-                                            "arguments": tool_call.function.arguments
+                                            "name": tool_call['function']['name'],
+                                            "arguments": tool_call['function']['arguments']
                                         }
                                     }
                                     for tool_call in data['choices'][0]['message']['tool_calls']
@@ -691,11 +691,11 @@ class AIChat:
                             # Execute tool calls and collect results
                             for tool_call in data['choices'][0]['message']['tool_calls']:
                                 result = self.tools_manager.execute_tool({
-                                    "id": tool_call.id,
+                                    "id": tool_call.get('id', ''),
                                     "type": "function",
                                     "function": {
-                                        "name": tool_call.function.name,
-                                        "arguments": tool_call.function.arguments
+                                        "name": tool_call['function']['name'],
+                                        "arguments": tool_call['function']['arguments']
                                     }
                                 })
                                 tool_results.append(result)
@@ -703,8 +703,8 @@ class AIChat:
                                 # Add tool result as a message
                                 tool_messages.append({
                                     "role": "tool",
-                                    "name": tool_call.function.name,
-                                    "tool_call_id": tool_call.id,
+                                    "name": tool_call['function']['name'],
+                                    "tool_call_id": tool_call.get('id', ''),
                                     "content": result
                                 })
                             
