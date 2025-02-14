@@ -2,19 +2,20 @@
     "tools": {
         "search": {
             "enabled": true,
-            "description": "Execute search tool to perform web searches and return results.",
+            "description": "Perform web searches and return formatted results.",
             "implementation": "search_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query to execute"
+                        "description": "The search query to execute"
                     },
                     "num_results": {
                         "type": "integer",
-                        "description": "Number of results to return",
-                        "default": 5
+                        "description": "Number of results to return (optional)",
+                        "default": 5,
+                        "minimum": 1
                     }
                 },
                 "required": ["query"]
@@ -22,14 +23,14 @@
         },
         "calculate": {
             "enabled": true,
-            "description": "Execute calculation tool to evaluate mathematical expressions safely.",
+            "description": "Evaluate mathematical expressions safely using supported arithmetic operations.",
             "implementation": "calculate_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "Mathematical expression to evaluate (supports basic arithmetic operations)"
+                        "description": "The mathematical expression to evaluate (supports +, -, *, /, ** operators)"
                     }
                 },
                 "required": ["expression"]
@@ -37,14 +38,14 @@
         },
         "time": {
             "enabled": true,
-            "description": "Execute time tool to get current time in specified timezone.",
+            "description": "Get current time and date information for a specified timezone.",
             "implementation": "time_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "timezone": {
                         "type": "string",
-                        "description": "Timezone name (e.g., 'America/New_York', 'Europe/London')",
+                        "description": "The timezone name from pytz database (e.g., 'America/New_York', 'Europe/London')",
                         "default": "UTC"
                     }
                 },
@@ -53,18 +54,18 @@
         },
         "weather": {
             "enabled": true,
-            "description": "Execute weather tool to get current weather information for a location.",
+            "description": "Get current weather information for a specified location.",
             "implementation": "weather_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "location": {
                         "type": "string",
-                        "description": "Location to get weather for"
+                        "description": "The location to get weather information for"
                     },
                     "units": {
                         "type": "string",
-                        "description": "Units system (metric or imperial)",
+                        "description": "The units system for temperature and measurements",
                         "enum": ["metric", "imperial"],
                         "default": "metric"
                     }
@@ -74,20 +75,20 @@
         },
         "system": {
             "enabled": true,
-            "description": "Execute system tool to get system information like OS, memory, disk, or CPU details.",
+            "description": "Get system information about OS, memory, disk usage, or CPU details.",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "type": {
                         "type": "string",
-                        "description": "Type of information to retrieve",
+                        "description": "The type of system information to retrieve",
                         "enum": ["os", "memory", "disk", "cpu", "all"],
                         "default": "all"
                     },
                     "path": {
                         "type": "string",
-                        "description": "Specific path for disk information (optional)"
+                        "description": "The specific path to get disk information for (only used with type='disk')"
                     }
                 },
                 "required": []
@@ -95,55 +96,55 @@
         },
         "fileops": {
             "enabled": true,
-            "description": "Execute file operations tool for file system tasks like read, write, copy, move, etc.",
+            "description": "Perform file system operations like reading, writing, copying, and moving files.",
             "implementation": "fileops_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "description": "Operation to perform",
+                        "description": "The file operation to perform",
                         "enum": ["info", "list", "exists", "find", "size", "create", "delete", "copy", "move", "write", "read"]
                     },
                     "path": {
                         "type": "string",
-                        "description": "Target path"
+                        "description": "The target file or directory path"
                     },
                     "detailed": {
                         "type": "boolean",
-                        "description": "Get detailed information",
+                        "description": "Whether to return detailed information for info operation",
                         "default": false
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "List subdirectories recursively",
+                        "description": "Whether to process subdirectories recursively for list/find operations",
                         "default": false
                     },
                     "pattern": {
                         "type": "string",
-                        "description": "Glob pattern for filtering"
+                        "description": "The glob pattern for filtering files in list/find operations"
                     },
                     "content": {
                         "type": "string",
-                        "description": "Content to write"
+                        "description": "The content to write for write operation"
                     },
                     "destination": {
                         "type": "string",
-                        "description": "Destination path"
+                        "description": "The destination path for copy/move operations"
                     },
                     "mkdir": {
                         "type": "boolean",
-                        "description": "Create directory instead of file",
+                        "description": "Whether to create a directory instead of a file for create operation",
                         "default": false
                     },
                     "start_line": {
                         "type": "integer",
-                        "description": "Start line number for read operation",
+                        "description": "The starting line number for read operation (1-based)",
                         "minimum": 1
                     },
                     "end_line": {
                         "type": "integer",
-                        "description": "End line number for read operation",
+                        "description": "The ending line number for read operation (1-based)",
                         "minimum": 1
                     }
                 },
@@ -152,30 +153,30 @@
         },
         "scrape": {
             "enabled": true,
-            "description": "Scrape a webpage using local Firecrawl instance and return the content in specified format.",
+            "description": "Scrape webpage content using a local Firecrawl instance.",
             "implementation": "scrape_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The URL to scrape (must start with http:// or https://)"
+                        "description": "The webpage URL to scrape (must start with http:// or https://)"
                     },
                     "format": {
                         "type": "string",
-                        "description": "Content format to return",
+                        "description": "The desired format for the scraped content",
                         "enum": ["markdown", "html", "links", "metadata"],
                         "default": "markdown"
                     },
                     "wait_for": {
                         "type": "integer",
-                        "description": "Time to wait for page load in milliseconds",
+                        "description": "The time to wait for page load in milliseconds",
                         "default": 5000,
                         "minimum": 0
                     },
                     "block_media": {
                         "type": "boolean",
-                        "description": "Whether to block media loading",
+                        "description": "Whether to block loading of media resources",
                         "default": true
                     }
                 },
