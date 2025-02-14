@@ -674,20 +674,37 @@ class AIChat:
                             assistant_message = {
                                 "role": "assistant",
                                 "content": initial_content,
-                                "tool_calls": data['choices'][0]['message']['tool_calls']
+                                "tool_calls": [
+                                    {
+                                        "id": tool_call.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool_call.function.name,
+                                            "arguments": tool_call.function.arguments
+                                        }
+                                    }
+                                    for tool_call in data['choices'][0]['message']['tool_calls']
+                                ]
                             }
                             messages.append(assistant_message)
                             
                             # Execute tool calls and collect results
                             for tool_call in data['choices'][0]['message']['tool_calls']:
-                                result = self.tools_manager.execute_tool(tool_call)
+                                result = self.tools_manager.execute_tool({
+                                    "id": tool_call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call.function.name,
+                                        "arguments": tool_call.function.arguments
+                                    }
+                                })
                                 tool_results.append(result)
                                 
                                 # Add tool result as a message
                                 tool_messages.append({
                                     "role": "tool",
-                                    "name": tool_call['function']['name'],
-                                    "tool_call_id": tool_call.get('id', ''),
+                                    "name": tool_call.function.name,
+                                    "tool_call_id": tool_call.id,
                                     "content": result
                                 })
                             
@@ -753,20 +770,76 @@ class AIChat:
                         "model": self.model_id,
                         "messages": messages,
                         "temperature": 0.7,
+                        "max_tokens": self.max_tokens if self.max_tokens else 4096,
                         "stream": self.streaming_enabled
                     }
-                    
-                    if self.max_tokens:
-                        request_data["max_tokens"] = self.max_tokens
+
+                    # Add tools configuration if enabled
+                    if self.tools_enabled and self.tools_manager:
+                        tools = self.tools_manager.get_enabled_tools()
+                        if tools:
+                            request_data["tools"] = tools
+                            request_data["tool_choice"] = "auto"
 
                     if self.streaming_enabled:
                         response = self.client.chat.completions.create(**request_data)
                         for chunk in response:
                             if interrupted:
                                 break
-                            if chunk.choices[0].delta.content is not None:
+                            if chunk.choices[0].delta.content:
                                 partial_response += chunk.choices[0].delta.content
-
+                            elif chunk.choices[0].delta.tool_calls:
+                                # Handle tool calls in streaming mode
+                                tool_call = chunk.choices[0].delta.tool_calls[0]
+                                if hasattr(tool_call, 'function'):  # Check if function exists
+                                    # Add the assistant's initial message and tool call
+                                    initial_content = chunk.choices[0].delta.content
+                                    assistant_message = {
+                                        "role": "assistant",
+                                        "content": initial_content,
+                                        "tool_calls": [
+                                            {
+                                                "id": tool_call.id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tool_call.function.name,
+                                                    "arguments": tool_call.function.arguments
+                                                }
+                                            }
+                                        ]
+                                    }
+                                    messages.append(assistant_message)
+                                    
+                                    # Execute tool call and get result
+                                    result = self.tools_manager.execute_tool({
+                                        "id": tool_call.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool_call.function.name,
+                                            "arguments": tool_call.function.arguments
+                                        }
+                                    })
+                                    
+                                    # Add tool result as a message
+                                    messages.append({
+                                        "role": "tool",
+                                        "name": tool_call.function.name,
+                                        "tool_call_id": tool_call.id,
+                                        "content": result
+                                    })
+                                    
+                                    # Make a second request to get the AI's natural response
+                                    request_data["messages"] = messages
+                                    request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                                    request_data.pop("tool_choice", None)
+                                    
+                                    response = self.client.chat.completions.create(**request_data)
+                                    for chunk in response:
+                                        if interrupted:
+                                            break
+                                        if chunk.choices[0].delta.content:
+                                            partial_response += chunk.choices[0].delta.content
+                        
                         # Get token usage with a separate non-streaming request
                         if not interrupted:
                             request_data["stream"] = False
@@ -790,7 +863,64 @@ class AIChat:
                         # Non-streaming mode
                         response = self.client.chat.completions.create(**request_data)
                         log_api_response("OpenAI", request_data, response)
-                        partial_response = response.choices[0].message.content.strip()
+                        
+                        # Handle tool calls in non-streaming mode
+                        if response.choices[0].message.tool_calls:
+                            tool_results = []
+                            tool_messages = []
+                            
+                            # First, add the assistant's initial message and tool call
+                            initial_content = response.choices[0].message.content
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": initial_content,
+                                "tool_calls": [
+                                    {
+                                        "id": tool_call.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool_call.function.name,
+                                            "arguments": tool_call.function.arguments
+                                        }
+                                    }
+                                    for tool_call in response.choices[0].message.tool_calls
+                                ]
+                            }
+                            messages.append(assistant_message)
+                            
+                            # Execute tool calls and collect results
+                            for tool_call in response.choices[0].message.tool_calls:
+                                result = self.tools_manager.execute_tool({
+                                    "id": tool_call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call.function.name,
+                                        "arguments": tool_call.function.arguments
+                                    }
+                                })
+                                tool_results.append(result)
+                                
+                                # Add tool result as a message
+                                tool_messages.append({
+                                    "role": "tool",
+                                    "name": tool_call.function.name,
+                                    "tool_call_id": tool_call.id,
+                                    "content": result
+                                })
+                            
+                            # Add all tool results to the conversation
+                            messages.extend(tool_messages)
+                            
+                            # Make a second request to get the AI's natural response
+                            request_data["messages"] = messages
+                            request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
+                            request_data.pop("tool_choice", None)
+                            
+                            response = self.client.chat.completions.create(**request_data)
+                            log_api_response("OpenAI", request_data, response)
+                            partial_response = response.choices[0].message.content.strip()
+                        else:
+                            partial_response = response.choices[0].message.content.strip()
                         
                         if hasattr(response, 'usage'):
                             self.last_tokens_prompt = response.usage.prompt_tokens
