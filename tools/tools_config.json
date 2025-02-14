@@ -225,6 +225,33 @@
                     "operation"
                 ]
             }
+        },
+        "x_post": {
+            "enabled": true,
+            "description": "Post a tweet to X (Twitter) using your account credentials.",
+            "implementation": "x_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text content of the tweet (max 280 characters)"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        "x": {
+            "enabled": true,
+            "description": "Post a tweet to X (Twitter).\n\n:param text: The text content of the tweet (max 280 characters)\n:return: Success message with tweet ID or error message",
+            "implementation": "x_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
         }
     }
 }
