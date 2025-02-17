@@ -3,10 +3,12 @@ from pydantic import BaseModel, Field, ConfigDict
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_community.embeddings import HuggingFaceEmbeddings
 import os
 import errno
 from dotenv import load_dotenv
 import json
+import torch
 from rich.console import Console
 from rich.panel import Panel
 import logging
@@ -25,9 +27,11 @@ class FileContent(BaseModel):
 class ChromaManager:
     # Available embedding models and their dimensions
     EMBEDDING_MODELS = {
-        'text-embedding-3-small': {'dimensions': 1536, 'description': 'Smallest and most cost-effective model'},
-        'text-embedding-3-large': {'dimensions': 3072, 'description': 'Most capable model for complex tasks'},
-        'text-embedding-ada-002': {'dimensions': 1536, 'description': 'Legacy model, good balance of performance and cost'}
+        'text-embedding-3-small': {'dimensions': 1536, 'description': 'OpenAI - Smallest and most cost-effective model', 'type': 'openai'},
+        'text-embedding-3-large': {'dimensions': 3072, 'description': 'OpenAI - Most capable model for complex tasks', 'type': 'openai'},
+        'text-embedding-ada-002': {'dimensions': 1536, 'description': 'OpenAI - Legacy model, good balance of performance and cost', 'type': 'openai'},
+        'snowflake-arctic-embed-l-v2.0': {'dimensions': 1024, 'description': 'Snowflake - High performance local model', 'type': 'local'},
+        'nomic-embed-text-v2-moe': {'dimensions': 768, 'description': 'Nomic AI - Mixture of experts local model', 'type': 'local'}
     }
 
     def __init__(self, logger: logging.Logger, console: Console):
@@ -41,9 +45,11 @@ class ChromaManager:
         self.persist_directory = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'chroma_stores')
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
         self.embedding_model_name = None  # Track current embedding model name
+        self.model_cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'model_cache')
         
-        # Create stores directory if it doesn't exist
+        # Create necessary directories
         os.makedirs(self.persist_directory, exist_ok=True)
+        os.makedirs(self.model_cache_dir, exist_ok=True)
         
         # Load environment variables
         load_dotenv()
@@ -52,49 +58,57 @@ class ChromaManager:
         self.initialize_embeddings()
     
     def initialize_embeddings(self) -> None:
-        """Initialize OpenAI embeddings with the selected model"""
+        """Initialize embeddings with the selected model"""
         try:
-            # Load environment variables again to ensure they're available
-            load_dotenv()
-            
-            # Get API key from environment
-            self.openai_api_key = os.getenv('OPENAI_API_KEY')
-            if not self.openai_api_key:
-                self.logger.warning("OpenAI API key not found in environment variables")
-                self.console.print(Panel(
-                    "[yellow]OpenAI API key not found. Please add it to your .env file:[/yellow]\n\n"
-                    "OPENAI_API_KEY=your-api-key-here",
-                    title="Configuration Required",
-                    border_style="yellow"
-                ))
-                return
-
             # Load settings to get the selected embedding model
             settings = self._load_settings()
             selected_model = settings.get('chromadb', {}).get('embedding_model', 'text-embedding-3-small')
-            self.embedding_model_name = selected_model  # Store the model name
+            self.embedding_model_name = selected_model
 
-            # Initialize embeddings with explicit parameters
-            self.embeddings = OpenAIEmbeddings(
-                model=selected_model,
-                openai_api_key=self.openai_api_key,
-                chunk_size=1000,  # Process texts in smaller chunks
-                max_retries=3     # Retry failed requests
-            )
+            model_info = self.EMBEDDING_MODELS.get(selected_model)
+            if not model_info:
+                raise ValueError(f"Unknown embedding model: {selected_model}")
+
+            if model_info['type'] == 'openai':
+                # Initialize OpenAI embeddings
+                self.openai_api_key = os.getenv('OPENAI_API_KEY')
+                if not self.openai_api_key:
+                    self.logger.warning("OpenAI API key not found in environment variables")
+                    self.console.print(Panel(
+                        "[yellow]OpenAI API key not found. Please add it to your .env file:[/yellow]\n\n"
+                        "OPENAI_API_KEY=your-api-key-here",
+                        title="Configuration Required",
+                        border_style="yellow"
+                    ))
+                    return
+
+                self.embeddings = OpenAIEmbeddings(
+                    model=selected_model,
+                    openai_api_key=self.openai_api_key,
+                    chunk_size=1000,
+                    max_retries=3
+                )
+            else:  # local models
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name=f"Snowflake/{selected_model}" if "snowflake" in selected_model else f"nomic-ai/{selected_model}",
+                    model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'},
+                    encode_kwargs={'normalize_embeddings': True},
+                    cache_folder=self.model_cache_dir
+                )
             
-            self.logger.info(f"Successfully initialized OpenAI embeddings with model: {selected_model}")
+            self.logger.info(f"Successfully initialized embeddings with model: {selected_model}")
             self.console.print(f"[green]Successfully initialized embeddings with model: {selected_model}[/green]")
                 
         except Exception as e:
             self.logger.error(f"Error initializing embeddings: {e}")
             self.embeddings = None
-            self.embedding_model_name = None  # Clear model name on error
+            self.embedding_model_name = None
             self.console.print(Panel(
                 f"[red]Error initializing embeddings:[/red]\n{str(e)}\n\n"
                 "[yellow]Please check:[/yellow]\n"
-                "1. Your OpenAI API key is valid\n"
-                "2. You have access to the selected embedding model\n"
-                "3. Your internet connection is working",
+                "1. Your internet connection (for downloading models)\n"
+                "2. You have sufficient disk space for local models\n"
+                "3. Your system meets the model requirements",
                 title="Initialization Error",
                 border_style="red"
             ))
@@ -107,7 +121,7 @@ class ChromaManager:
                 if not self.embeddings:
                     return False
 
-            self.console.print("[cyan]Testing OpenAI embeddings...[/cyan]")
+            self.console.print("[cyan]Testing embeddings...[/cyan]")
             _ = self.embeddings.embed_query("Test query")
             self.console.print("[green]Embeddings test successful![/green]")
             return True
@@ -1039,7 +1053,7 @@ class ChromaManager:
 
             questions = [
                 inquirer.List('model',
-                    message="Select OpenAI Embedding Model",
+                    message="Select Embedding Model",
                     choices=choices,
                     carousel=True
                 ),
@@ -1085,6 +1099,19 @@ class ChromaManager:
             self.logger.error(f"Error selecting embedding model: {e}")
             self.console.print(f"[red]Error selecting embedding model: {e}[/red]")
             return False 
+
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        """List all available embedding models with their details"""
+        models = []
+        for name, info in self.EMBEDDING_MODELS.items():
+            model_type = "OpenAI API" if info['type'] == 'openai' else "Local (Hugging Face)"
+            models.append({
+                'name': name,
+                'dimensions': info['dimensions'],
+                'description': info['description'],
+                'type': model_type
+            })
+        return models
 
     def unload_store(self) -> None:
         """Unload the current store and clean up resources"""

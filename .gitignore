@@ -51,3 +51,4 @@ act_stats.db
 
 
 tools/scrape_tool.py
+model_cache/
