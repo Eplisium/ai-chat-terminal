@@ -351,53 +351,6 @@
                     "operation"
                 ]
             }
-        },
-        "x": {
-            "enabled": true,
-            "description": "Interact with X (Twitter) using your account credentials.",
-            "implementation": "x_tool.py",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "operation": {
-                        "type": "string",
-                        "description": "The operation to perform",
-                        "enum": [
-                            "post",
-                            "get_user",
-                            "search",
-                            "get_tweet"
-                        ],
-                        "default": "post"
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "The text content for posting (max 280 characters). Required for 'post' operation."
-                    },
-                    "username": {
-                        "type": "string",
-                        "description": "Username to look up. Required for 'get_user' operation."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search query for finding tweets. Required for 'search' operation."
-                    },
-                    "tweet_id": {
-                        "type": "string",
-                        "description": "Tweet ID to retrieve. Required for 'get_tweet' operation."
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of search results (default: 10, max: 100)",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 100
-                    }
-                },
-                "required": [
-                    "operation"
-                ]
-            }
         }
     }
 }
