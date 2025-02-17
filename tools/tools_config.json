@@ -1,7 +1,7 @@
 {
     "tools": {
         "search": {
-            "enabled": true,
+            "enabled": false,
             "description": "Perform web searches and return formatted results.",
             "implementation": "search_tool.py",
             "parameters": {
@@ -24,7 +24,7 @@
             }
         },
         "calculate": {
-            "enabled": true,
+            "enabled": false,
             "description": "Evaluate mathematical expressions safely using supported arithmetic operations.",
             "implementation": "calculate_tool.py",
             "parameters": {
@@ -41,7 +41,7 @@
             }
         },
         "time": {
-            "enabled": true,
+            "enabled": false,
             "description": "Get current time and date information for a specified timezone.",
             "implementation": "time_tool.py",
             "parameters": {
@@ -57,7 +57,7 @@
             }
         },
         "weather": {
-            "enabled": true,
+            "enabled": false,
             "description": "Get current weather information for a specified location.",
             "implementation": "weather_tool.py",
             "parameters": {
@@ -83,7 +83,7 @@
             }
         },
         "system": {
-            "enabled": true,
+            "enabled": false,
             "description": "Get system information about OS, memory, disk usage, or CPU details.",
             "implementation": "system_tool.py",
             "parameters": {
@@ -110,7 +110,7 @@
             }
         },
         "scrape": {
-            "enabled": true,
+            "enabled": false,
             "description": "Use local Firecrawl instance for web scraping, crawling, mapping and data extraction.",
             "implementation": "scrape_tool.py",
             "parameters": {
@@ -275,7 +275,7 @@
             }
         },
         "filesystem": {
-            "enabled": true,
+            "enabled": false,
             "description": "Perform file system operations like searching and reading files across the system.",
             "implementation": "filesystem_tool.py",
             "parameters": {

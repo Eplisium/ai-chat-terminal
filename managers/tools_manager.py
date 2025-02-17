@@ -202,6 +202,10 @@ class ToolsManager:
             function_name = tool_call['function']['name']
             arguments = json.loads(tool_call['function']['arguments'])
             
+            # Check if tool is enabled in both settings and available_tools
+            if not self.available_tools.get(function_name, {}).get('enabled', True):
+                return f"Tool is disabled: {function_name}"
+            
             if function_name not in self.loaded_tools:
                 return f"Tool not found or not enabled: {function_name}"
             

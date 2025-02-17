@@ -5,7 +5,8 @@ from managers import (
     SystemInstructionsManager,
     DataManager,
     ChromaManager,
-    StatsManager
+    StatsManager,
+    ToolsManager
 )
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
 from typing import Dict, Any
@@ -658,7 +659,12 @@ class AIChatApp:
             settings = self._load_settings()
             tools_settings = settings.get('tools', {})
             tools_enabled = tools_settings.get('enabled', False)
-            available_tools = tools_settings.get('available_tools', {})
+            
+            # Initialize tools manager if not already done
+            if not hasattr(self, 'tools_manager'):
+                self.tools_manager = ToolsManager(self.logger, self.settings_manager)
+            
+            available_tools = self.tools_manager.available_tools
 
             choices = [
                 ("═══ AI Tools Settings ═══", None),
@@ -699,17 +705,20 @@ class AIChatApp:
                 self._save_settings(settings)
                 new_status = "enabled" if not tools_enabled else "disabled"
                 icon = "🟢" if not tools_enabled else "⭕"
-                self.console.print(f"{icon} AI tools {new_status}")
+                self.console.print(f"{icon} AI Tools {new_status}")
+            
             elif answer['action'].startswith("toggle_"):
                 # Toggle individual tool
                 tool_name = answer['action'][7:]  # Remove "toggle_" prefix
                 if tool_name in available_tools:
-                    available_tools[tool_name]['enabled'] = not available_tools[tool_name].get('enabled', True)
-                    settings['tools']['available_tools'] = available_tools
-                    self._save_settings(settings)
-                    new_status = "enabled" if available_tools[tool_name]['enabled'] else "disabled"
-                    icon = "✓" if available_tools[tool_name]['enabled'] else "✗"
-                    self.console.print(f"{icon} {tool_name.title()} tool {new_status}")
+                    current_state = available_tools[tool_name].get('enabled', True)
+                    success = self.tools_manager.enable_tool(tool_name, not current_state)
+                    if success:
+                        new_state = "enabled" if not current_state else "disabled"
+                        icon = "🟢" if not current_state else "⭕"
+                        self.console.print(f"{icon} Tool '{tool_name}' {new_state}")
+                    else:
+                        self.console.print(f"[red]Failed to change tool state for '{tool_name}'[/red]")
 
     def manage_agent_settings(self, agent_status):
         """Manage RAG settings"""
