@@ -89,9 +89,18 @@ class ChromaManager:
                     max_retries=3
                 )
             else:  # local models
+                model_name = f"Snowflake/{selected_model}" if "snowflake" in selected_model else f"nomic-ai/{selected_model}"
+                model_kwargs = {
+                    'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+                }
+                
+                # Add trust_remote_code for Nomic model
+                if "nomic" in selected_model:
+                    model_kwargs['trust_remote_code'] = True
+                
                 self.embeddings = HuggingFaceEmbeddings(
-                    model_name=f"Snowflake/{selected_model}" if "snowflake" in selected_model else f"nomic-ai/{selected_model}",
-                    model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'},
+                    model_name=model_name,
+                    model_kwargs=model_kwargs,
                     encode_kwargs={'normalize_embeddings': True},
                     cache_folder=self.model_cache_dir
                 )

@@ -17,6 +17,7 @@ chromadb>=0.4.0
 transformers>=4.36.0  # for local Hugging Face models
 torch>=2.1.0  # for PyTorch backend
 accelerate>=0.25.0  # for optimized model loading
+einops>=0.7.0  # required by Nomic model
 
 # Document handling
 python-docx>=0.8.11  # for DOCX files
