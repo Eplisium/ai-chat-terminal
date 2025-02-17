@@ -111,18 +111,30 @@
         },
         "scrape": {
             "enabled": true,
-            "description": "Scrape webpage content using a local Firecrawl instance.",
+            "description": "Use local Firecrawl instance for web scraping, crawling, mapping and data extraction.",
             "implementation": "scrape_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The webpage URL to scrape (must start with http:// or https://)"
+                        "description": "The URL to process (must start with http:// or https://)"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "The operation mode to use",
+                        "enum": [
+                            "scrape",
+                            "crawl",
+                            "map",
+                            "extract",
+                            "sitemap"
+                        ],
+                        "default": "scrape"
                     },
                     "format": {
                         "type": "string",
-                        "description": "The desired format for the scraped content",
+                        "description": "Content format for scrape/crawl modes",
                         "enum": [
                             "markdown",
                             "html",
@@ -131,9 +143,21 @@
                         ],
                         "default": "markdown"
                     },
+                    "max_pages": {
+                        "type": "integer",
+                        "description": "Maximum pages to crawl (only for crawl mode)",
+                        "default": 10,
+                        "minimum": 1
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum depth for crawl/map/sitemap operations",
+                        "default": 2,
+                        "minimum": 1
+                    },
                     "wait_for": {
                         "type": "integer",
-                        "description": "The time to wait for page load in milliseconds",
+                        "description": "Time to wait for page load in milliseconds",
                         "default": 5000,
                         "minimum": 0
                     },
@@ -141,6 +165,108 @@
                         "type": "boolean",
                         "description": "Whether to block loading of media resources",
                         "default": true
+                    },
+                    "follow_pattern": {
+                        "type": "string",
+                        "description": "Regex pattern for URLs to follow during operations"
+                    },
+                    "extract_rules": {
+                        "type": "array",
+                        "description": "List of extraction rules for data extraction mode",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "selector": {
+                                    "type": "string",
+                                    "description": "CSS selector for the element to extract"
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Name for the extracted data field"
+                                }
+                            },
+                            "required": [
+                                "selector",
+                                "name"
+                            ]
+                        }
+                    },
+                    "include_assets": {
+                        "type": "boolean",
+                        "description": "Include asset files in site mapping (only for map mode)",
+                        "default": false
+                    },
+                    "follow_sitemap": {
+                        "type": "boolean",
+                        "description": "Whether to follow sitemap for additional URLs",
+                        "default": false
+                    },
+                    "scrape_discovered_links": {
+                        "type": "boolean",
+                        "description": "Whether to scrape content from discovered links in scrape mode",
+                        "default": false
+                    },
+                    "max_links": {
+                        "type": "integer",
+                        "description": "Maximum number of discovered links to scrape in scrape mode",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 100
+                    },
+                    "max_workers": {
+                        "type": "integer",
+                        "description": "Maximum number of parallel workers for link scraping in scrape mode",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 20
+                    },
+                    "sitemap_options": {
+                        "type": "object",
+                        "description": "Additional options for sitemap handling",
+                        "properties": {
+                            "maxDepth": {
+                                "type": "integer",
+                                "description": "Maximum depth for sitemap traversal",
+                                "default": 2,
+                                "minimum": 1
+                            },
+                            "validateUrls": {
+                                "type": "boolean",
+                                "description": "Whether to validate URLs found in sitemap",
+                                "default": true
+                            },
+                            "followSitemapIndex": {
+                                "type": "boolean",
+                                "description": "Whether to follow sitemap index files",
+                                "default": true
+                            },
+                            "excludePatterns": {
+                                "type": "array",
+                                "description": "Patterns to exclude from sitemap processing",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "includePatterns": {
+                                "type": "array",
+                                "description": "Patterns to include in sitemap processing",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "maxRetries": {
+                                "type": "integer",
+                                "description": "Maximum number of retries for failed requests",
+                                "default": 3,
+                                "minimum": 0
+                            },
+                            "retryDelay": {
+                                "type": "integer",
+                                "description": "Delay between retries in milliseconds",
+                                "default": 1000,
+                                "minimum": 0
+                            }
+                        }
                     }
                 },
                 "required": [
@@ -228,7 +354,7 @@
         },
         "x": {
             "enabled": true,
-            "description": "Interact with X (Twitter) using your account credentials. Supports multiple operations including posting tweets, looking up users, searching tweets, and getting tweet details. Requires X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, and X_ACCESS_TOKEN_SECRET environment variables.",
+            "description": "Interact with X (Twitter) using your account credentials.",
             "implementation": "x_tool.py",
             "parameters": {
                 "type": "object",
