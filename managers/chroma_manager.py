@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 import os
 import errno
 from dotenv import load_dotenv
