@@ -52,3 +52,5 @@ act_stats.db
 
 tools/scrape_tool.py
 model_cache/
+guide.md
+tools/tools_config.json
