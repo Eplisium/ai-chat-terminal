@@ -102,6 +102,7 @@
                             "processes",
                             "services",
                             "storage",
+                            "ip",
                             "all"
                         ],
                         "default": "all"
@@ -109,6 +110,16 @@
                     "path": {
                         "type": "string",
                         "description": "The specific path to get disk information for (only used with type='disk')"
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "description": "Level of detail for network information (only used with type='network')",
+                        "enum": [
+                            "basic",
+                            "standard",
+                            "full"
+                        ],
+                        "default": "standard"
                     }
                 },
                 "required": []

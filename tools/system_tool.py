@@ -27,7 +27,7 @@ def get_cached_cpu_percent(percpu: bool = False) -> Union[float, List[float]]:
 
 def validate_info_type(info_type: str) -> None:
     """Validate the requested information type"""
-    valid_types = {'os', 'memory', 'disk', 'cpu', 'gpu', 'network', 'processes', 'services', 'storage', 'all'}
+    valid_types = {'os', 'memory', 'disk', 'cpu', 'gpu', 'network', 'processes', 'services', 'storage', 'ip', 'all'}
     if info_type not in valid_types:
         raise SystemToolError(f"Invalid info_type. Must be one of: {', '.join(valid_types)}")
 
@@ -127,46 +127,94 @@ def get_external_ip() -> Dict:
     except Exception as e:
         return {'external_ip': f'Error: {str(e)}'}
 
-def get_network_info() -> Dict:
-    """Get detailed network information"""
+def get_network_info(detail_level: str = 'standard') -> Dict:
+    """Get detailed network information
+    
+    Args:
+        detail_level (str): Level of detail to return
+            - 'basic': Only external IP and basic interface info
+            - 'standard': External IP, interfaces, and basic stats
+            - 'full': All available network information
+    """
     try:
-        network_info = {
-            'interfaces': {},
-            'connections': [],
-            'stats': psutil.net_io_counters()._asdict()
-        }
+        network_info = {}
         
-        # Add external IP information
+        # Basic info - always included
         network_info.update(get_external_ip())
         
-        # Network interfaces
+        # Interface addresses (basic info)
+        interfaces = {}
         for nic, addrs in psutil.net_if_addrs().items():
             nic_info = []
             for addr in addrs:
-                nic_info.append({
+                addr_info = {
                     'address': addr.address,
-                    'netmask': addr.netmask,
-                    'family': str(addr.family),
-                    'broadcast': addr.broadcast if hasattr(addr, 'broadcast') else None,
-                    'ptp': addr.ptp if hasattr(addr, 'ptp') else None
-                })
-            network_info['interfaces'][nic] = {
-                'addresses': nic_info,
-                'stats': psutil.net_if_stats()[nic]._asdict() if nic in psutil.net_if_stats() else {}
-            }
+                    'family': str(addr.family)
+                }
+                # Add additional fields for standard and full detail levels
+                if detail_level in ('standard', 'full'):
+                    addr_info.update({
+                        'netmask': addr.netmask,
+                        'broadcast': addr.broadcast if hasattr(addr, 'broadcast') else None
+                    })
+                if detail_level == 'full':
+                    addr_info['ptp'] = addr.ptp if hasattr(addr, 'ptp') else None
+                nic_info.append(addr_info)
+            
+            interfaces[nic] = {'addresses': nic_info}
+            
+            # Add interface statistics for standard and full detail levels
+            if detail_level in ('standard', 'full'):
+                if nic in psutil.net_if_stats():
+                    stats = psutil.net_if_stats()[nic]
+                    interfaces[nic]['stats'] = {
+                        'speed': stats.speed,
+                        'mtu': stats.mtu,
+                        'up': stats.isup
+                    }
+                    # Add full statistics for full detail level
+                    if detail_level == 'full':
+                        interfaces[nic]['stats'].update({
+                            'duplex': stats.duplex,
+                            'flags': getattr(stats, 'flags', None)
+                        })
         
-        # Active connections
-        for conn in psutil.net_connections(kind='inet'):
-            connection_info = {
-                'fd': conn.fd,
-                'family': str(conn.family),
-                'type': str(conn.type),
-                'local_addr': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else None,
-                'remote_addr': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
-                'status': conn.status,
-                'pid': conn.pid
+        network_info['interfaces'] = interfaces
+        
+        # Add IO counters for standard and full detail levels
+        if detail_level in ('standard', 'full'):
+            io_counters = psutil.net_io_counters()
+            network_info['io_counters'] = {
+                'bytes_sent': bytes2human(io_counters.bytes_sent),
+                'bytes_recv': bytes2human(io_counters.bytes_recv),
+                'packets_sent': io_counters.packets_sent,
+                'packets_recv': io_counters.packets_recv
             }
-            network_info['connections'].append(connection_info)
+            
+            # Add error and drop counts for full detail
+            if detail_level == 'full':
+                network_info['io_counters'].update({
+                    'errin': io_counters.errin,
+                    'errout': io_counters.errout,
+                    'dropin': io_counters.dropin,
+                    'dropout': io_counters.dropout
+                })
+        
+        # Add connection information only for full detail level
+        if detail_level == 'full':
+            connections = []
+            for conn in psutil.net_connections(kind='inet'):
+                connection_info = {
+                    'fd': conn.fd,
+                    'family': str(conn.family),
+                    'type': str(conn.type),
+                    'local_addr': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else None,
+                    'remote_addr': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
+                    'status': conn.status,
+                    'pid': conn.pid
+                }
+                connections.append(connection_info)
+            network_info['connections'] = connections
             
         return network_info
     except Exception as e:
@@ -239,14 +287,52 @@ def get_disk_info(path: Optional[str] = None) -> Dict:
     except Exception as e:
         raise SystemToolError(f"Error getting disk information: {str(e)}")
 
+def get_ip_addresses() -> Dict:
+    """Get local and external IP addresses"""
+    try:
+        ip_info = {}
+        
+        # Get external IP
+        ip_info.update(get_external_ip())
+        
+        # Get local IPs
+        local_ips = {
+            'ipv4': [],
+            'ipv6': []
+        }
+        
+        # Get all network interfaces
+        for nic, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                # Skip loopback addresses
+                if addr.address in ('127.0.0.1', '::1'):
+                    continue
+                    
+                if addr.family == socket.AF_INET:  # IPv4
+                    local_ips['ipv4'].append({
+                        'interface': nic,
+                        'address': addr.address
+                    })
+                elif addr.family == socket.AF_INET6:  # IPv6
+                    local_ips['ipv6'].append({
+                        'interface': nic,
+                        'address': addr.address
+                    })
+        
+        ip_info['local_ip'] = local_ips
+        return ip_info
+    except Exception as e:
+        raise SystemToolError(f"Error getting IP addresses: {str(e)}")
+
 def execute(arguments: Dict[str, str]) -> str:
     """Execute system tool to get system information
     
     Args:
         arguments: Dictionary containing:
             type (str): Type of information to retrieve 
-                ('os', 'memory', 'disk', 'cpu', 'gpu', 'network', 'processes', 'services', 'storage', 'all')
+                ('os', 'memory', 'disk', 'cpu', 'gpu', 'network', 'processes', 'services', 'storage', 'ip', 'all')
             path (str, optional): Specific path for disk information
+            detail_level (str, optional): Detail level for network information ('basic', 'standard', 'full')
             
     Returns:
         str: JSON formatted system information
@@ -254,11 +340,15 @@ def execute(arguments: Dict[str, str]) -> str:
     try:
         info_type = arguments.get('type', 'all').lower()
         path = arguments.get('path')
+        detail_level = arguments.get('detail_level', 'standard')
         
         # Validate input
         validate_info_type(info_type)
         
-        if info_type == 'os':
+        if info_type == 'ip':
+            return json.dumps(get_ip_addresses(), indent=2)
+            
+        elif info_type == 'os':
             return json.dumps({
                 'system': platform.system(),
                 'release': platform.release(),
@@ -320,7 +410,7 @@ def execute(arguments: Dict[str, str]) -> str:
             return json.dumps(get_gpu_info(), indent=2)
             
         elif info_type == 'network':
-            return json.dumps(get_network_info(), indent=2)
+            return json.dumps(get_network_info(detail_level), indent=2)
             
         elif info_type == 'processes':
             return json.dumps(get_process_info(), indent=2)
@@ -370,7 +460,7 @@ def execute(arguments: Dict[str, str]) -> str:
                     'load_avg': psutil.getloadavg()
                 },
                 'gpu': get_gpu_info(),
-                'network': get_network_info()
+                'network': get_network_info('standard')
             }
             return json.dumps(all_info, indent=2)
             
