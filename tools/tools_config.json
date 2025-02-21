@@ -84,7 +84,7 @@
         },
         "system": {
             "enabled": true,
-            "description": "Get system information about OS, memory, disk usage, or CPU details.",
+            "description": "Get comprehensive system information including OS, memory, storage, CPU, GPU, network, processes, and services details.",
             "implementation": "system_tool.py",
             "parameters": {
                 "type": "object",
@@ -97,6 +97,11 @@
                             "memory",
                             "disk",
                             "cpu",
+                            "gpu",
+                            "network",
+                            "processes",
+                            "services",
+                            "storage",
                             "all"
                         ],
                         "default": "all"
@@ -110,7 +115,7 @@
             }
         },
         "scrape": {
-            "enabled": true,
+            "enabled": false,
             "description": "Use local Firecrawl instance for web scraping, crawling, mapping and data extraction.",
             "implementation": "scrape_tool.py",
             "parameters": {
@@ -275,7 +280,7 @@
             }
         },
         "filesystem": {
-            "enabled": true,
+            "enabled": false,
             "description": "Perform file system operations like searching and reading files across the system.",
             "implementation": "filesystem_tool.py",
             "parameters": {
