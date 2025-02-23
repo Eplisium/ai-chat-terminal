@@ -774,14 +774,42 @@ class AIChatApp:
                 break
 
             if answer['action'] == "toggle":
-                settings['agent']['enabled'] = not agent_enabled
+                # Toggle overall RAG feature
+                new_status = not agent_enabled  # Store new status
+                settings['agent']['enabled'] = new_status
+                
                 # Save last used store when disabling
                 if agent_enabled and self.chroma_manager.store_name:
                     settings['agent']['last_store'] = self.chroma_manager.store_name
+                
+                # Save settings before initializing embeddings
                 self._save_settings(settings)
-                new_status = "enabled" if not agent_enabled else "disabled"
-                icon = "🟡" if not agent_enabled else "⭕"
-                self.console.print(f"{icon} RAG {new_status}")
+                
+                if not new_status:  # Disabling RAG
+                    # Unload the store first if one is loaded
+                    if self.chroma_manager.store_name:
+                        self.chroma_manager.unload_store()
+                    # Clear embeddings
+                    self.chroma_manager.embeddings = None
+                    self.chroma_manager.embedding_model_name = None
+                    icon = "⭕"
+                    self.console.print(f"{icon} RAG disabled")
+                else:  # Enabling RAG
+                    # Initialize embeddings first
+                    success = self.chroma_manager.initialize_embeddings()
+                    if success:
+                        icon = "🟡"
+                        self.console.print(f"{icon} RAG enabled")
+                        # Try to load last used store if available
+                        last_store = settings.get('agent', {}).get('last_store')
+                        if last_store and last_store in self.chroma_manager.list_stores():
+                            if self.chroma_manager.load_store(last_store):
+                                self.console.print(f"[green]Loaded last used store: {last_store}[/green]")
+                    else:
+                        # If initialization fails, revert the settings
+                        settings['agent']['enabled'] = False
+                        self._save_settings(settings)
+                        self.console.print("[red]Failed to initialize embeddings. RAG will remain disabled.[/red]")
                 continue  # Continue the loop instead of returning
 
             elif answer['action'] == "test_embeddings":

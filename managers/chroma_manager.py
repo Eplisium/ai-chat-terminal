@@ -54,11 +54,13 @@ class ChromaManager:
         # Load environment variables
         load_dotenv()
         
-        # Initialize embeddings
-        self.initialize_embeddings()
+        # Only initialize embeddings if RAG is enabled
+        settings = self._load_settings()
+        if settings.get('agent', {}).get('enabled', False):
+            self.initialize_embeddings()
     
-    def initialize_embeddings(self) -> None:
-        """Initialize embeddings with the selected model"""
+    def initialize_embeddings(self) -> bool:
+        """Initialize embeddings with the selected model. Returns True if successful, False otherwise."""
         try:
             # Load settings to get the selected embedding model
             settings = self._load_settings()
@@ -80,7 +82,7 @@ class ChromaManager:
                         title="Configuration Required",
                         border_style="yellow"
                     ))
-                    return
+                    return False
 
                 self.embeddings = OpenAIEmbeddings(
                     model=selected_model,
@@ -107,6 +109,7 @@ class ChromaManager:
             
             self.logger.info(f"Successfully initialized embeddings with model: {selected_model}")
             self.console.print(f"[green]Successfully initialized embeddings with model: {selected_model}[/green]")
+            return True
                 
         except Exception as e:
             self.logger.error(f"Error initializing embeddings: {e}")
@@ -121,6 +124,7 @@ class ChromaManager:
                 title="Initialization Error",
                 border_style="red"
             ))
+            return False
 
     def test_embeddings(self) -> bool:
         """Test if embeddings are working correctly"""
