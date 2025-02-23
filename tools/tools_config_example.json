@@ -1,9 +1,9 @@
 {
     "tools": {
-        "example_search": {
-            "enabled": true,
-            "description": "Example search tool that demonstrates basic parameter structure",
-            "implementation": "example_search_tool.py",
+        "search": {
+            "enabled": false,
+            "description": "Perform web searches and return formatted results.",
+            "implementation": "search_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -11,108 +11,197 @@
                         "type": "string",
                         "description": "The search query to execute"
                     },
-                    "limit": {
+                    "num_results": {
                         "type": "integer",
-                        "description": "Maximum number of results to return",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 100
+                        "description": "Number of results to return (optional)",
+                        "default": 5,
+                        "minimum": 1
                     }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         },
-        "example_data_processor": {
-            "enabled": true,
-            "description": "Example data processing tool that shows complex parameter structures",
-            "implementation": "example_processor_tool.py",
+        "calculate": {
+            "enabled": false,
+            "description": "Evaluate mathematical expressions safely using supported arithmetic operations.",
+            "implementation": "calculate_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "input_format": {
+                    "expression": {
                         "type": "string",
-                        "description": "Format of the input data",
-                        "enum": ["json", "csv", "xml", "yaml"],
-                        "default": "json"
-                    },
-                    "output_format": {
-                        "type": "string",
-                        "description": "Format for the output data",
-                        "enum": ["json", "csv", "xml", "yaml"],
-                        "default": "json"
-                    },
-                    "filters": {
-                        "type": "array",
-                        "description": "List of filters to apply to the data",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "field": {
-                                    "type": "string",
-                                    "description": "Field name to filter on"
-                                },
-                                "operator": {
-                                    "type": "string",
-                                    "description": "Filter operator",
-                                    "enum": ["equals", "contains", "greater_than", "less_than"]
-                                },
-                                "value": {
-                                    "type": "string",
-                                    "description": "Value to compare against"
-                                }
-                            },
-                            "required": ["field", "operator", "value"]
-                        }
-                    },
-                    "options": {
-                        "type": "object",
-                        "description": "Additional processing options",
-                        "properties": {
-                            "case_sensitive": {
-                                "type": "boolean",
-                                "description": "Whether string comparisons are case sensitive",
-                                "default": false
-                            },
-                            "skip_empty": {
-                                "type": "boolean",
-                                "description": "Whether to skip empty fields",
-                                "default": true
-                            },
-                            "max_depth": {
-                                "type": "integer",
-                                "description": "Maximum depth for nested processing",
-                                "default": 3,
-                                "minimum": 1,
-                                "maximum": 10
-                            }
-                        }
+                        "description": "The mathematical expression to evaluate (supports +, -, *, /, ** operators)"
                     }
                 },
-                "required": ["input_format"]
+                "required": [
+                    "expression"
+                ]
             }
         },
-        "example_system": {
+        "time": {
             "enabled": true,
-            "description": "Example system tool that shows simple parameter structure with enums",
-            "implementation": "example_system_tool.py",
+            "description": "Get current time and date information for a specified timezone.",
+            "implementation": "time_tool.py",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "info_type": {
+                    "timezone": {
                         "type": "string",
-                        "description": "Type of system information to retrieve",
-                        "enum": ["cpu", "memory", "disk", "network"],
-                        "default": "cpu"
-                    },
-                    "format": {
-                        "type": "string",
-                        "description": "Output format",
-                        "enum": ["text", "json"],
-                        "default": "json"
+                        "description": "The timezone name from pytz database (e.g., 'America/New_York', 'Europe/London')",
+                        "default": "UTC"
                     }
                 },
                 "required": []
             }
+        },
+        "weather": {
+            "enabled": false,
+            "description": "Get current weather information for a specified location.",
+            "implementation": "weather_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The location to get weather information for"
+                    },
+                    "units": {
+                        "type": "string",
+                        "description": "The units system for temperature and measurements",
+                        "enum": [
+                            "metric",
+                            "imperial"
+                        ],
+                        "default": "metric"
+                    }
+                },
+                "required": [
+                    "location"
+                ]
+            }
+        },
+        "system": {
+            "enabled": true,
+            "description": "Get comprehensive system information including OS, memory, storage, CPU, GPU, network, processes, and services details.",
+            "implementation": "system_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "The type of system information to retrieve",
+                        "enum": [
+                            "os",
+                            "memory",
+                            "disk",
+                            "cpu",
+                            "gpu",
+                            "network",
+                            "processes",
+                            "services",
+                            "storage",
+                            "ip",
+                            "all"
+                        ],
+                        "default": "all"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The specific path to get disk information for (only used with type='disk')"
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "description": "Level of detail for network information (only used with type='network')",
+                        "enum": [
+                            "basic",
+                            "standard",
+                            "full"
+                        ],
+                        "default": "standard"
+                    }
+                },
+                "required": []
+            }
+        },
+        "filesystem": {
+            "enabled": false,
+            "description": "Perform file system operations like searching and reading files across the system.",
+            "implementation": "filesystem_tool.py",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "The operation to perform",
+                        "enum": [
+                            "search",
+                            "read",
+                            "info",
+                            "list",
+                            "user"
+                        ],
+                        "default": "search"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Target path for the operation (not required for 'user' operation)"
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "File pattern for search/list operations (e.g., '*.txt', '*.py')",
+                        "default": "*"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text to search for within files"
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum directory depth for search",
+                        "default": 10,
+                        "minimum": 1
+                    },
+                    "exclude_dirs": {
+                        "type": "array",
+                        "description": "List of directory names to exclude from search",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [
+                            ".git",
+                            "node_modules",
+                            "__pycache__",
+                            "venv",
+                            ".env"
+                        ]
+                    },
+                    "include_hidden": {
+                        "type": "boolean",
+                        "description": "Whether to include hidden files and directories",
+                        "default": false
+                    },
+                    "include_preview": {
+                        "type": "boolean",
+                        "description": "Whether to include content preview in file info",
+                        "default": false
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Starting line number for read operation (1-based, inclusive)",
+                        "minimum": 1
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Ending line number for read operation (1-based, inclusive)",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "operation"
+                ]
+            }
         }
     }
-} 
+}
