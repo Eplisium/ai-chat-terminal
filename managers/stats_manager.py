@@ -188,6 +188,7 @@ class StatsManager:
                         ) m ON s.model_id = m.model_id
                         LEFT JOIN chat_stats c ON c.model_id = s.model_id 
                             AND c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                            AND c.is_command = 0
                         GROUP BY m.model_id, m.model_name, m.provider, s.id, s.start_time, s.end_time
                     ),
                     model_stats AS (
@@ -202,18 +203,17 @@ class StatsManager:
                             SUM(completion_tokens) as total_completion_tokens
                         FROM model_sessions
                         GROUP BY model_id, model_name, provider
-                        HAVING msg_count > 0
                     )
                     SELECT 
                         model_name,
                         provider,
                         session_count,
-                        msg_count,
-                        total_cost,
-                        total_prompt_tokens,
-                        total_completion_tokens
+                        COALESCE(msg_count, 0) as msg_count,
+                        COALESCE(total_cost, 0) as total_cost,
+                        COALESCE(total_prompt_tokens, 0) as total_prompt_tokens,
+                        COALESCE(total_completion_tokens, 0) as total_completion_tokens
                     FROM model_stats
-                    ORDER BY session_count DESC, total_cost DESC, msg_count DESC
+                    ORDER BY session_count DESC, msg_count DESC, total_cost DESC
                     LIMIT 1
                 ''')
                 result = cursor.fetchone()
@@ -404,17 +404,17 @@ class StatsManager:
                         ) m ON s.model_id = m.model_id
                         LEFT JOIN chat_stats c ON c.model_id = s.model_id 
                             AND c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                            AND c.is_command = 0
                         GROUP BY m.provider, s.id, s.start_time, s.end_time
                     ),
                     provider_stats AS (
                         SELECT 
                             provider,
                             COUNT(DISTINCT session_id) as session_count,
-                            SUM(session_msg_count) as msg_count,
-                            SUM(session_cost) as total_cost
+                            COALESCE(SUM(session_msg_count), 0) as msg_count,
+                            COALESCE(SUM(session_cost), 0) as total_cost
                         FROM provider_sessions
                         GROUP BY provider
-                        HAVING msg_count > 0
                     )
                     SELECT 
                         provider,
@@ -422,7 +422,7 @@ class StatsManager:
                         msg_count,
                         total_cost
                     FROM provider_stats
-                    ORDER BY session_count DESC, total_cost DESC, msg_count DESC
+                    ORDER BY session_count DESC, msg_count DESC, total_cost DESC
                 ''')
                 results = cursor.fetchall()
                 if results:
@@ -453,13 +453,14 @@ class StatsManager:
                         SELECT 
                             COUNT(DISTINCT CASE WHEN c.message_type = 'sent' AND c.is_command = 0 THEN c.id END) as msg_count,
                             COUNT(DISTINCT s.id) as session_count,
-                            COALESCE(SUM(CASE WHEN c.message_type = 'received' THEN c.cost ELSE 0 END), 0) as total_cost
-                        FROM chat_stats c
-                        LEFT JOIN chat_sessions s ON c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
-                        WHERE date(c.timestamp) = ? AND c.is_command = 0
+                            COALESCE(SUM(CASE WHEN c.message_type = 'received' AND c.is_command = 0 THEN c.cost ELSE 0 END), 0) as total_cost
+                        FROM chat_sessions s
+                        LEFT JOIN chat_stats c ON c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                            AND c.is_command = 0
+                        WHERE date(s.start_time) = ?
                     ''', (date,))
                     result = cursor.fetchone()
-                    if result[0] > 0:  # Only include days with activity
+                    if result[1] > 0:  # Include if there were any sessions
                         stats.append({
                             'date': date,
                             'usage_count': result[0],
@@ -494,12 +495,18 @@ class StatsManager:
 
         # Most Used Model
         if most_used:
+            # Format model name consistently
+            model_display = f"{most_used['model_name']} ({most_used['provider'].lower()})"
+            
+            # Validate token counts match
+            total_tokens = most_used['prompt_tokens'] + most_used['completion_tokens']
+            
             main_table.add_row(
                 "Most Used Model",
                 Text.from_markup(
-                    f"[bold]{most_used['model_name']}[/] ([cyan]{most_used['provider']}[/])\n"
+                    f"[bold]{model_display}[/]\n"
                     f"[green]{most_used['usage_count']}[/] Msgs ([cyan]{most_used['session_count']} sessions[/])\n"
-                    f"Total Tokens: [cyan]{most_used['prompt_tokens'] + most_used['completion_tokens']:,}[/]\n"
+                    f"Total Tokens: [cyan]{total_tokens:,}[/]\n"
                     f"• Prompt Tokens: [blue]{most_used['prompt_tokens']:,}[/]\n"
                     f"• Completion Tokens: [blue]{most_used['completion_tokens']:,}[/]\n"
                     f"Total Cost: [yellow]${most_used['total_cost']:.6f}[/]"
@@ -508,30 +515,45 @@ class StatsManager:
         else:
             main_table.add_row("Most Used Model", "No data available")
 
-        # Last Session (renamed from Last Used Model)
+        # Last Session
         if last_used:
+            # Format model name consistently
+            model_display = f"{last_used['model_name']} ({last_used['provider'].lower()})"
+            
+            # Calculate totals
+            total_tokens = (last_used['sent']['total_tokens'] + last_used['received']['total_tokens'])
+            total_prompt = (last_used['sent']['prompt_tokens'] + last_used['received']['prompt_tokens'])
+            total_completion = (last_used['sent']['completion_tokens'] + last_used['received']['completion_tokens'])
             total_cost = last_used['sent']['cost'] + last_used['received']['cost']
+            
             main_table.add_row(
                 "Last Session",
                 Text.from_markup(
-                    f"[bold]{last_used['model_name']}[/] ([cyan]{last_used['provider']}[/])\n"
+                    f"[bold]{model_display}[/]\n"
                     f"Last used: [green]{last_used['timestamp']}[/]\n"
                     f"Messages Sent: [green]{last_used['sent']['count']:,}[/]\n"
                     f"Messages Received: [green]{last_used['received']['count']:,}[/]\n"
-                    f"Total Tokens: [cyan]{last_used['sent']['total_tokens'] + last_used['received']['total_tokens']:,}[/]\n"
-                    f"• Prompt Tokens: [blue]{last_used['sent']['prompt_tokens'] + last_used['received']['prompt_tokens']:,}[/]\n"
-                    f"• Completion Tokens: [blue]{last_used['sent']['completion_tokens'] + last_used['received']['completion_tokens']:,}[/]\n"
+                    f"Total Tokens: [cyan]{total_tokens:,}[/]\n"
+                    f"• Prompt Tokens: [blue]{total_prompt:,}[/]\n"
+                    f"• Completion Tokens: [blue]{total_completion:,}[/]\n"
                     f"Total Cost: [yellow]${total_cost:.6f}[/]"
                 )
             )
         else:
             main_table.add_row("Last Session", "No data available")
 
-        # Overall Chat Statistics (renamed from Chat Statistics)
+        # Overall Chat Statistics
         if chat_stats:
             sent = chat_stats['sent']
             received = chat_stats['received']
             totals = chat_stats['totals']
+            
+            # Validate total tokens match sum of prompt and completion
+            total_tokens = totals['prompt_tokens'] + totals['completion_tokens']
+            if total_tokens != totals['total_tokens']:
+                self.logger.warning(f"Token count mismatch in overall stats: {total_tokens} vs {totals['total_tokens']}")
+                totals['total_tokens'] = total_tokens
+            
             main_table.add_row(
                 "Overall Chat Stats",
                 Text.from_markup(
