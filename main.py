@@ -1509,8 +1509,16 @@ class AIChatApp:
                 # Update main menu choices with RAG status
                 main_choices = [
                     ("═══ Select Your AI Provider ═══", None),
-                    ("★ Favorite Models   〈Your preferred AI companions〉", "favorites"),
                 ]
+                
+                # Add Recent Model option if a recent model exists
+                recent_model = next((m for m in self.models_config if m.get('recent', False)), None)
+                if recent_model:
+                    recent_provider = recent_model.get('provider', '').upper()
+                    main_choices.append((f"🕒 Recent Model      〈{recent_model['name']} ({recent_provider})〉", "recent"))
+                
+                # Add Favorites option
+                main_choices.append(("★ Favorite Models   〈Your preferred AI companions〉", "favorites"))
                 
                 # OpenAI status - Green when RAG is enabled
                 if openai_available:
@@ -1626,6 +1634,15 @@ class AIChatApp:
                     self.manage_settings()
                 elif answer['provider'] == "favorites":
                     self.manage_favorites()
+                elif answer['provider'] == "recent":
+                    # Find the recent model
+                    recent_model = next((m for m in self.models_config if m.get('recent', False)), None)
+                    if recent_model:
+                        if self._handle_model_selection(recent_model):
+                            continue  # Return to main menu
+                    else:
+                        self.console.print("[yellow]No recent model found[/yellow]")
+                        continue
                 elif answer['provider'] == "openai" and openai_available:
                     # Filter OpenAI models
                     openai_models = [m for m in self.models_config if m.get('provider', '').lower() == 'openai']
@@ -1753,6 +1770,9 @@ class AIChatApp:
                 self.chroma_manager.store_name is not None
             )
             
+            # Save as recent model
+            self._save_recent_model(model_config)
+            
             chat = AIChat(
                 model_config,
                 self.logger,
@@ -1768,6 +1788,60 @@ class AIChatApp:
             self.logger.error(f"Error starting chat: {e}", exc_info=True)
             self.console.print(f"[bold red]Error starting chat: {e}[/bold red]")
             return False
+
+    def _save_recent_model(self, model_config):
+        """Save the current model as the recent model in models.json"""
+        try:
+            # Make a copy of the model config
+            recent_model = model_config.copy()
+            
+            # Add or set the recent flag
+            recent_model['recent'] = True
+            
+            # Load the current models.json file
+            models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+            with open(models_path, 'r') as f:
+                models_data = json.load(f)
+            
+            # Remove the recent flag from any existing models
+            for model in models_data['models']:
+                if 'recent' in model:
+                    del model['recent']
+            
+            # Check if the model is already in models.json
+            model_exists = False
+            for model in models_data['models']:
+                if model['id'] == recent_model['id']:
+                    model['recent'] = True
+                    model_exists = True
+                    break
+            
+            # If the model is not in models.json (e.g., OpenRouter models), add it
+            if not model_exists and recent_model.get('provider') == 'openrouter':
+                # Format OpenRouter model for storage
+                formatted_model = {
+                    'id': recent_model['id'],
+                    'name': recent_model['name'],
+                    'description': recent_model.get('description', 'No description available'),
+                    'context_window': recent_model.get('context_length', 4096),
+                    'max_tokens': 4096,  # Default value if not specified
+                    'provider': 'openrouter',
+                    'recent': True
+                }
+                models_data['models'].append(formatted_model)
+            
+            # Save the updated models.json file
+            with open(models_path, 'w') as f:
+                json.dump(models_data, f, indent=4)
+            
+            self.logger.info(f"Saved {recent_model['name']} as recent model")
+            
+            # Update the models_config in memory
+            self.models_config = models_data['models']
+            
+        except Exception as e:
+            self.logger.error(f"Error saving recent model: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error saving recent model: {e}[/bold red]")
 
     def _load_settings(self) -> Dict:
         """Load settings from file"""

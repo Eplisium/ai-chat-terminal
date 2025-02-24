@@ -1272,6 +1272,9 @@ class AIChat:
                     'name': self.model_name,
                     'provider': self.provider
                 })
+                
+                # Track this model as recently used
+                self._update_model_as_recent()
 
             # Display ACT logo
             logo = """[bold cyan]
@@ -1888,3 +1891,48 @@ class AIChat:
     def _execute_tool_call(self, tool_call):
         """Execute a tool call and return the result"""
         return self.tools_manager.execute_tool(tool_call)
+
+    def _update_model_as_recent(self):
+        """Update this model as the most recently used model in models.json"""
+        try:
+            # Create a model config object
+            model_config = {
+                'id': self.model_id,
+                'name': self.model_name,
+                'description': f"{self.model_name} ({self.provider})",
+                'context_window': 4096,  # Default value
+                'max_tokens': self.max_tokens or 4096,
+                'provider': self.provider,
+                'recent': True  # Mark as recent
+            }
+            
+            # Load the current models.json file
+            models_path = os.path.join(os.path.dirname(__file__), 'models.json')
+            with open(models_path, 'r') as f:
+                models_data = json.load(f)
+            
+            # Remove the recent flag from any existing models
+            for model in models_data['models']:
+                if 'recent' in model:
+                    del model['recent']
+            
+            # Check if the model is already in models.json
+            model_exists = False
+            for model in models_data['models']:
+                if model['id'] == self.model_id:
+                    model['recent'] = True
+                    model_exists = True
+                    break
+            
+            # If it's a new model, add it to models.json
+            if not model_exists:
+                models_data['models'].append(model_config)
+            
+            # Save the updated models.json file
+            with open(models_path, 'w') as f:
+                json.dump(models_data, f, indent=4)
+            
+        except Exception as e:
+            # Just log the error but don't interrupt the chat
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error updating recent model: {e}", exc_info=True)
