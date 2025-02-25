@@ -126,8 +126,8 @@
             }
         },
         "filesystem": {
-            "enabled": false,
-            "description": "Perform file system operations like searching and reading files across the system.",
+            "enabled": true,
+            "description": "Perform comprehensive file system operations including file management, searching, reading, writing, and metadata operations.",
             "implementation": "filesystem_tool.py",
             "parameters": {
                 "type": "object",
@@ -138,15 +138,47 @@
                         "enum": [
                             "search",
                             "read",
+                            "read_chunk",
                             "info",
                             "list",
-                            "user"
+                            "list_tree",
+                            "tree",
+                            "user",
+                            "drives",
+                            "path_info",
+                            "create_dir",
+                            "mkdir",
+                            "create_file",
+                            "write",
+                            "append",
+                            "delete_file",
+                            "remove",
+                            "delete_dir",
+                            "rmdir",
+                            "copy_file",
+                            "cp",
+                            "move_file",
+                            "mv",
+                            "copy_dir",
+                            "cp_dir",
+                            "move_dir",
+                            "mv_dir",
+                            "permissions",
+                            "chmod",
+                            "find_duplicates",
+                            "checksum",
+                            "checksums",
+                            "compress",
+                            "extract",
+                            "set_times",
+                            "touch",
+                            "metadata"
                         ],
                         "default": "search"
                     },
                     "path": {
                         "type": "string",
-                        "description": "Target path for the operation (not required for 'user' operation)"
+                        "description": "Target path for the operation (not required for 'user' or 'drives' operations)"
                     },
                     "pattern": {
                         "type": "string",
@@ -155,11 +187,15 @@
                     },
                     "content": {
                         "type": "string",
-                        "description": "Text to search for within files"
+                        "description": "Text to search for within files or content to write/append to a file"
+                    },
+                    "content_query": {
+                        "type": "string",
+                        "description": "Alternative to content: text to search for within files"
                     },
                     "max_depth": {
                         "type": "integer",
-                        "description": "Maximum directory depth for search",
+                        "description": "Maximum directory depth for search or tree operations",
                         "default": 10,
                         "minimum": 1
                     },
@@ -187,6 +223,11 @@
                         "description": "Whether to include content preview in file info",
                         "default": false
                     },
+                    "include_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to include extended metadata in file info",
+                        "default": false
+                    },
                     "start_line": {
                         "type": "integer",
                         "description": "Starting line number for read operation (1-based, inclusive)",
@@ -196,6 +237,147 @@
                         "type": "integer",
                         "description": "Ending line number for read operation (1-based, inclusive)",
                         "minimum": 1
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Byte offset for read_chunk operation",
+                        "default": 0,
+                        "minimum": 0
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "Number of bytes to read for read_chunk operation",
+                        "default": 1024,
+                        "minimum": 1
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination path for copy/move/compress operations"
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Whether to overwrite existing files/directories for copy/move operations",
+                        "default": false
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to delete directories recursively",
+                        "default": false
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "description": "Hash algorithm for checksum calculation",
+                        "enum": [
+                            "md5",
+                            "sha1",
+                            "sha256",
+                            "sha512"
+                        ],
+                        "default": "sha256"
+                    },
+                    "algorithms": {
+                        "type": "array",
+                        "description": "List of hash algorithms for multiple checksums",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "md5",
+                                "sha1",
+                                "sha256",
+                                "sha512"
+                            ]
+                        },
+                        "default": [
+                            "md5",
+                            "sha1",
+                            "sha256"
+                        ]
+                    },
+                    "min_size": {
+                        "type": "integer",
+                        "description": "Minimum file size for search or duplicate operations",
+                        "default": 1024,
+                        "minimum": 0
+                    },
+                    "max_size": {
+                        "type": "integer",
+                        "description": "Maximum file size for search operations",
+                        "minimum": 0
+                    },
+                    "modified_after": {
+                        "type": "string",
+                        "description": "Include files modified after this date (ISO format)"
+                    },
+                    "modified_before": {
+                        "type": "string",
+                        "description": "Include files modified before this date (ISO format)"
+                    },
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Whether to perform case-sensitive content search",
+                        "default": false
+                    },
+                    "file_extensions": {
+                        "type": "array",
+                        "description": "List of file extensions to include in search",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "regex_pattern": {
+                        "type": "boolean",
+                        "description": "Whether the content_query is a regex pattern",
+                        "default": false
+                    },
+                    "mode": {
+                        "type": "integer",
+                        "description": "Permission mode for directory creation or chmod operation (octal)"
+                    },
+                    "exist_ok": {
+                        "type": "boolean",
+                        "description": "Don't error if directory already exists during creation",
+                        "default": false
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "File encoding for write/append operations",
+                        "default": "utf-8"
+                    },
+                    "secure_delete": {
+                        "type": "boolean",
+                        "description": "Perform secure deletion by overwriting with zeros first",
+                        "default": false
+                    },
+                    "mtime": {
+                        "type": "number",
+                        "description": "Modification time for set_times operation (seconds since epoch)"
+                    },
+                    "atime": {
+                        "type": "number",
+                        "description": "Access time for set_times operation (seconds since epoch)"
+                    },
+                    "archive_format": {
+                        "type": "string",
+                        "description": "Archive format for compress operation",
+                        "enum": [
+                            "zip",
+                            "tar",
+                            "gztar",
+                            "bztar",
+                            "xztar"
+                        ],
+                        "default": "zip"
+                    },
+                    "source_paths": {
+                        "type": "array",
+                        "description": "List of paths to compress for compress operation",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "Password for extract operation on encrypted archives"
                     }
                 },
                 "required": [
