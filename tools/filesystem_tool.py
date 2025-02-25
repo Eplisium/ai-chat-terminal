@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Union, BinaryIO, TextIO, Tuple, Any, Set
 from datetime import datetime
+from dotenv import load_dotenv  # Added for .env file support
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -282,11 +283,16 @@ def get_user_info() -> Dict:
     :return: Dictionary containing user information and paths
     """
     try:
+        # Load environment variables from .env file
+        load_dotenv()
+        
         username = getpass.getuser()
         home = str(Path.home())
-        desktop = os.path.join(home, 'Desktop')
-        documents = os.path.join(home, 'Documents')
-        downloads = os.path.join(home, 'Downloads')
+        
+        # Use environment variables if available, otherwise use default paths
+        desktop = os.environ.get('DESKTOP') or os.path.join(home, 'Desktop')
+        documents = os.environ.get('DOCUMENTS') or os.path.join(home, 'Documents')
+        downloads = os.environ.get('DOWNLOADS') or os.path.join(home, 'Downloads')
         
         return {
             'username': username,
