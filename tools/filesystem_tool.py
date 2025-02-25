@@ -12,6 +12,7 @@ import re
 import time
 import platform
 import tempfile
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Union, BinaryIO, TextIO, Tuple, Any, Set
 from datetime import datetime
@@ -1438,13 +1439,414 @@ def extract_archive(archive_path: str, destination: str, password: str = None) -
     except Exception as e:
         raise FileSystemError(f"Error extracting archive: {str(e)}")
 
+def open_file_or_application(path: str, arguments: Optional[List[str]] = None, timeout: int = 30) -> Dict:
+    """Open a file or application with the system's default program
+    
+    :param path: Path to the file or application to open
+    :param arguments: Optional list of arguments to pass to the application
+    :param timeout: Timeout in seconds for command execution (only used for error checking)
+    :return: Dictionary with structured operation result
+    """
+    try:
+        normalized_path = os.path.normpath(path)
+        
+        if not is_safe_path(normalized_path):
+            raise FileSystemError("Path is not safe for opening")
+            
+        if not os.path.exists(normalized_path):
+            raise FileSystemError(f"Path not found: {normalized_path}")
+            
+        result = {
+            'success': False,
+            'operation': 'open',
+            'path': normalized_path,
+            'original_path': path,
+            'time': datetime.now().isoformat(),
+            'platform': platform.system(),
+            'file_type': os.path.splitext(normalized_path)[1].lower(),
+        }
+        
+        # Handle based on platform
+        if platform.system() == 'Windows':
+            # Handle Windows shortcut files (.lnk)
+            if normalized_path.lower().endswith('.lnk'):
+                try:
+                    import win32com.client
+                    shell = win32com.client.Dispatch("WScript.Shell")
+                    shortcut = shell.CreateShortCut(normalized_path)
+                    target_path = shortcut.Targetpath
+                    working_dir = shortcut.WorkingDirectory
+                    
+                    result['shortcut_target'] = target_path
+                    result['shortcut_working_dir'] = working_dir
+                    
+                    # If target exists, use it instead
+                    if os.path.exists(target_path):
+                        normalized_path = target_path
+                        result['resolved_path'] = normalized_path
+                    else:
+                        result['warning'] = f"Shortcut target not found: {target_path}"
+                except ImportError:
+                    result['warning'] = "win32com module not available, cannot resolve shortcut target"
+                except Exception as e:
+                    result['warning'] = f"Error resolving shortcut: {str(e)}"
+            
+            # On Windows, use PowerShell to handle path properly
+            try:
+                # Properly quote the path to handle spaces and special characters
+                quoted_path = f'"{normalized_path}"'
+                
+                if arguments:
+                    # If there are arguments, construct proper PowerShell command
+                    args_str = ','.join([f'"{arg}"' for arg in arguments])
+                    cmd = ['powershell', '-Command', f'Start-Process -FilePath {quoted_path} -ArgumentList {args_str}']
+                else:
+                    # Simple case with no arguments
+                    cmd = ['powershell', '-Command', f'Start-Process {quoted_path}']
+                
+                proc = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                
+                # Wait for a short time to check for immediate errors
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                    result['return_code'] = proc.returncode
+                    
+                    if stderr:
+                        result['stderr'] = stderr.decode('utf-8', errors='replace').strip()
+                    
+                    result['success'] = proc.returncode == 0
+                except subprocess.TimeoutExpired:
+                    # This is expected for applications that stay open
+                    proc.kill()
+                    result['success'] = True
+                    result['warning'] = "Process started but didn't complete within timeout (likely running as expected)"
+            
+            except Exception as e:
+                result['error'] = str(e)
+                result['error_type'] = type(e).__name__
+                return result
+                
+        elif platform.system() == 'Darwin':  # macOS
+            try:
+                cmd = ['open']
+                if arguments:
+                    cmd.extend(['-a', normalized_path, '--args'])
+                    cmd.extend(arguments)
+                else:
+                    cmd.append(normalized_path)
+                
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                
+                # Wait for a short time to check for immediate errors
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                    result['return_code'] = proc.returncode
+                    
+                    if stderr:
+                        result['stderr'] = stderr.decode('utf-8', errors='replace').strip()
+                    
+                    result['success'] = proc.returncode == 0
+                except subprocess.TimeoutExpired:
+                    # This is expected for applications that stay open
+                    proc.kill()
+                    result['success'] = True
+                    result['warning'] = "Process started but didn't complete within timeout (likely running as expected)"
+            
+            except Exception as e:
+                result['error'] = str(e)
+                result['error_type'] = type(e).__name__
+                return result
+                
+        else:  # Linux and others
+            try:
+                cmd = ['xdg-open', normalized_path]
+                
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                
+                # Wait for a short time to check for immediate errors
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                    result['return_code'] = proc.returncode
+                    
+                    if stderr:
+                        result['stderr'] = stderr.decode('utf-8', errors='replace').strip()
+                    
+                    result['success'] = proc.returncode == 0
+                except subprocess.TimeoutExpired:
+                    # This is expected for applications that stay open
+                    proc.kill()
+                    result['success'] = True
+                    result['warning'] = "Process started but didn't complete within timeout (likely running as expected)"
+            
+            except Exception as e:
+                result['error'] = str(e)
+                result['error_type'] = type(e).__name__
+                return result
+                
+        # Add file information if successful
+        if result['success'] and os.path.isfile(normalized_path):
+            result['file_info'] = {
+                'size': os.path.getsize(normalized_path),
+                'size_human': f"{os.path.getsize(normalized_path) / 1024:.2f} KB" if os.path.getsize(normalized_path) < 1024 * 1024 else f"{os.path.getsize(normalized_path) / (1024 * 1024):.2f} MB",
+                'type': mimetypes.guess_type(normalized_path)[0] or 'application/octet-stream',
+                'extension': os.path.splitext(normalized_path)[1].lower(),
+                'modified': datetime.fromtimestamp(os.path.getmtime(normalized_path)).isoformat()
+            }
+            
+        return result
+    except FileSystemError as e:
+        # Return structured error for FileSystemError
+        return {
+            'success': False,
+            'operation': 'open',
+            'path': path,
+            'error': str(e),
+            'error_type': 'FileSystemError',
+            'time': datetime.now().isoformat()
+        }
+    except Exception as e:
+        # Return structured error for other exceptions
+        return {
+            'success': False,
+            'operation': 'open',
+            'path': path,
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'time': datetime.now().isoformat()
+        }
+
+def run_command(command: str, timeout: int = 60, shell: bool = True, cwd: Optional[str] = None, 
+                env: Optional[Dict[str, str]] = None, strict_security: bool = True) -> Dict:
+    """Run a command in the system shell with improved error handling and security
+    
+    :param command: Command to run
+    :param timeout: Timeout in seconds for command execution
+    :param shell: Whether to use shell execution
+    :param cwd: Current working directory for the command
+    :param env: Environment variables for the command
+    :param strict_security: Whether to apply strict security checks
+    :return: Dictionary with structured operation result
+    """
+    start_time = time.time()
+    result = {
+        'success': False,
+        'operation': 'run_command',
+        'command': command,
+        'time_start': datetime.now().isoformat(),
+        'platform': platform.system(),
+        'pid': None,
+        'timeout_specified': timeout,
+        'shell': shell,
+    }
+    
+    if cwd:
+        result['cwd'] = cwd
+    
+    try:
+        # Security checks
+        if strict_security:
+            # Define dangerous patterns
+            dangerous_commands = [
+                # Destructive file operations
+                r'rm\s+-rf\s+[/~]', r'deltree\s+/[a-z]', r'format\s+[a-z]:',
+                # Fork bombs and resource exhaustion
+                r':\(\){:', r'while\s*true', r'for\s*\(\(\s*;;\s*\)\)',
+                # Disk operations
+                r'>\s*/dev/[sh]d[a-z]', r'dd\s+if=/dev/zero\s+of=',
+                # Network operations that could download malicious content
+                r'wget\s+http', r'curl\s+http', r'powershell\s+-\w+\s+iex',
+                # Shell redirections that hide output
+                r'>\s*/dev/null\s+2>&1', r'>\s+NUL\s+2>&1',
+                # System modification commands
+                r'chmod\s+-R\s+777\s+/', r'chown\s+-R\s+\w+\s+/',
+                # Shutdown/reboot commands
+                r'shutdown', r'reboot', r'halt', r'init\s+[06]'
+            ]
+            
+            # Check command against dangerous patterns
+            for pattern in dangerous_commands:
+                if re.search(pattern, command, re.IGNORECASE):
+                    result['error'] = f"Potentially dangerous command pattern detected: {pattern}"
+                    result['error_type'] = 'SecurityError'
+                    return result
+                    
+        # Choose execution method based on platform
+        if platform.system() == 'Windows':
+            # Windows-specific execution wrapper
+            if not shell:
+                # Direct execution
+                process = subprocess.Popen(
+                    command if shell else command.split(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=shell,
+                    cwd=cwd,
+                    env=env,
+                    text=True,
+                    errors='replace'
+                )
+            else:
+                # Use PowerShell for better command execution on Windows
+                process = subprocess.Popen(
+                    ['powershell', '-Command', command],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=False,  # Don't use shell for the powershell command itself
+                    cwd=cwd,
+                    env=env,
+                    text=True,
+                    errors='replace'
+                )
+        else:
+            # Unix-based execution
+            process = subprocess.Popen(
+                command if shell else command.split(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=shell,
+                cwd=cwd,
+                env=env,
+                text=True,
+                errors='replace'
+            )
+            
+        # Record process ID
+        result['pid'] = process.pid
+        
+        try:
+            # Wait for command completion with timeout
+            stdout, stderr = process.communicate(timeout=timeout)
+            
+            # Format output for clean parsing
+            result.update({
+                'return_code': process.returncode,
+                'success': process.returncode == 0,
+                'stdout': stdout.strip() if stdout else '',
+                'stderr': stderr.strip() if stderr else '',
+                'stdout_lines': stdout.strip().split('\n') if stdout else [],
+                'stderr_lines': stderr.strip().split('\n') if stderr else [],
+                'execution_time_seconds': round(time.time() - start_time, 3),
+                'time_end': datetime.now().isoformat(),
+                'timed_out': False
+            })
+            
+            # Add error details if command failed
+            if process.returncode != 0:
+                result['error'] = stderr.strip() if stderr else "Command failed with no error output"
+                result['error_type'] = 'CommandExecutionError'
+                
+        except subprocess.TimeoutExpired:
+            # Handle timeout
+            process.kill()
+            
+            result.update({
+                'success': False,
+                'timed_out': True,
+                'error': f"Command execution timed out after {timeout} seconds",
+                'error_type': 'TimeoutError',
+                'execution_time_seconds': round(time.time() - start_time, 3),
+                'time_end': datetime.now().isoformat()
+            })
+            
+            # Try to collect any output that was generated before timeout
+            try:
+                stdout, stderr = process.communicate(timeout=0.5)
+                result['stdout'] = stdout.strip() if stdout else ''
+                result['stderr'] = stderr.strip() if stderr else ''
+                result['stdout_lines'] = stdout.strip().split('\n') if stdout else []
+                result['stderr_lines'] = stderr.strip().split('\n') if stderr else []
+                result['partial_output'] = True
+            except:
+                result['partial_output'] = False
+                
+    except FileNotFoundError:
+        result.update({
+            'success': False,
+            'error': f"Command not found: {command.split()[0] if not shell else command}",
+            'error_type': 'FileNotFoundError',
+            'execution_time_seconds': round(time.time() - start_time, 3),
+            'time_end': datetime.now().isoformat()
+        })
+        
+    except PermissionError:
+        result.update({
+            'success': False,
+            'error': f"Permission denied when executing command",
+            'error_type': 'PermissionError',
+            'execution_time_seconds': round(time.time() - start_time, 3),
+            'time_end': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        result.update({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'execution_time_seconds': round(time.time() - start_time, 3),
+            'time_end': datetime.now().isoformat()
+        })
+        
+    # AI parsability improvements - detect and convert output formats
+    try:
+        if result.get('success', False) and result.get('stdout', ''):
+            stdout = result.get('stdout', '')
+            
+            # Try to detect JSON output
+            if stdout.strip().startswith('{') and stdout.strip().endswith('}'):
+                try:
+                    json_data = json.loads(stdout)
+                    result['parsed_json'] = json_data
+                    result['detected_format'] = 'json'
+                except:
+                    pass
+                    
+            # Try to detect table/csv output
+            elif '\n' in stdout and ',' in stdout and stdout.count(',') > stdout.count('\n'):
+                lines = stdout.strip().split('\n')
+                if all(line.count(',') == lines[0].count(',') for line in lines):
+                    try:
+                        import csv
+                        from io import StringIO
+                        
+                        # Parse as CSV
+                        csv_data = []
+                        csv_reader = csv.reader(StringIO(stdout))
+                        for row in csv_reader:
+                            csv_data.append(row)
+                            
+                        if len(csv_data) > 1:  # Must have header and at least one data row
+                            result['parsed_csv'] = {
+                                'headers': csv_data[0],
+                                'rows': csv_data[1:]
+                            }
+                            result['detected_format'] = 'csv'
+                    except:
+                        pass
+    except:
+        # Don't fail if parsing enhancement fails
+        pass
+        
+    return result
+
 def execute(arguments: Dict) -> str:
     """Execute filesystem operations for searching, reading, and manipulating files
     
     :param operation: Operation to perform (search, read, read_chunk, info, list, list_tree, tree, user, drives,
                       path_info, create_dir, create_file, write, append, delete_file, delete_dir, 
                       copy_file, move_file, copy_dir, move_dir, permissions, find_duplicates,
-                      checksum, checksums, compress, extract, set_times, metadata)
+                      checksum, checksums, compress, extract, set_times, metadata, open, run)
     :param path: Target path for the operation
     :param pattern: File pattern for search/list operations (e.g., "*.txt", "*.py")
     :param content: Text to search for within files or content to write
@@ -1477,6 +1879,8 @@ def execute(arguments: Dict) -> str:
     :param include_metadata: Whether to include extended metadata
     :param encoding: File encoding for write/append operations
     :param secure_delete: Whether to perform secure deletion
+    :param arguments: Optional list of arguments to pass to the application when opening
+    :param command: Command to run for run operation
     :return: Operation result as JSON string
     
     Example:
@@ -1517,6 +1921,18 @@ def execute(arguments: Dict) -> str:
         ...     "operation": "copy_file",
         ...     "source": "C:\\Projects\\example.py",
         ...     "destination": "C:\\Backup\\example.py"
+        ... })
+        >>>
+        >>> # Open a file or application
+        >>> result = execute({
+        ...     "operation": "open",
+        ...     "path": "C:\\Program Files\\Example\\app.exe"
+        ... })
+        >>>
+        >>> # Run a command
+        >>> result = execute({
+        ...     "operation": "run",
+        ...     "command": "dir"
         ... })
     """
     try:
@@ -1887,13 +2303,33 @@ def execute(arguments: Dict) -> str:
                 "result": result
             }, indent=2)
             
+        elif operation == 'run':
+            command = arguments.get('command')
+            if not command:
+                return json.dumps({"error": "Command is required"}, indent=2)
+                
+            result = run_command(command)
+            return json.dumps({
+                "operation": "run_command",
+                "result": result
+            }, indent=2)
+            
+        elif operation == 'open':
+            args = arguments.get('arguments', [])
+            result = open_file_or_application(path, args)
+            return json.dumps({
+                "operation": "open",
+                "result": result
+            }, indent=2)
+            
         else:
             valid_operations = [
                 "search", "read", "read_chunk", "info", "list", "list_tree", "tree", "user", "drives",
                 "path_info", "create_dir", "mkdir", "create_file", "write", "append", "delete_file",
                 "remove", "delete_dir", "rmdir", "copy_file", "cp", "move_file", "mv", "copy_dir",
                 "cp_dir", "move_dir", "mv_dir", "permissions", "chmod", "find_duplicates",
-                "checksum", "checksums", "compress", "extract", "set_times", "touch", "metadata"
+                "checksum", "checksums", "compress", "extract", "set_times", "touch", "metadata",
+                "open", "run"
             ]
             return json.dumps({
                 "error": f"Invalid operation: {operation}",

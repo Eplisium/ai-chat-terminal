@@ -172,13 +172,15 @@
                             "extract",
                             "set_times",
                             "touch",
-                            "metadata"
+                            "metadata",
+                            "open",
+                            "run"
                         ],
                         "default": "search"
                     },
                     "path": {
                         "type": "string",
-                        "description": "Target path for the operation (not required for 'user' or 'drives' operations)"
+                        "description": "Target path for the operation (not required for 'user', 'drives', or 'run' operations)"
                     },
                     "pattern": {
                         "type": "string",
@@ -378,6 +380,44 @@
                     "password": {
                         "type": "string",
                         "description": "Password for extract operation on encrypted archives"
+                    },
+                    "arguments": {
+                        "type": "array",
+                        "description": "List of arguments to pass to the application when opening",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Command to run in the system shell for run operation"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds for command execution or application opening",
+                        "default": 60,
+                        "minimum": 1
+                    },
+                    "shell": {
+                        "type": "boolean",
+                        "description": "Whether to use shell execution for run operation",
+                        "default": true
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Current working directory for the run operation"
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": "Environment variables for the run operation",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "strict_security": {
+                        "type": "boolean",
+                        "description": "Whether to apply strict security checks for run operation",
+                        "default": true
                     }
                 },
                 "required": [
