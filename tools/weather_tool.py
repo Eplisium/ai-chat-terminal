@@ -4,6 +4,12 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = Path(__file__).resolve().parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -187,16 +193,27 @@ def execute(arguments: Dict[str, Any]) -> str:
     
     Args:
         arguments (dict): Dictionary containing:
-            location (str): Location to get weather for (e.g. "York PA USA" or "London UK")
-            units (str): Units system ('metric' or 'imperial')
+            location (str, optional): Location to get weather for (e.g. "York PA USA" or "London UK").
+                                     If not provided, will use DEFAULT_LOCATION from .env file.
+            units (str): Units system ('metric' or 'imperial', default: 'imperial')
             detailed_view (bool): Whether to return a detailed report (default: True)
             forecast (bool): Whether to include forecast data (default: False)
             
     Returns:
         str: Formatted weather information or error message
     """
-    location = arguments['location']
-    units = arguments.get('units', 'metric')
+    # Check if location is provided, otherwise use default from .env
+    if 'location' in arguments and arguments['location']:
+        location = arguments['location']
+    else:
+        # Try to get default location from environment variable
+        default_location = os.getenv('DEFAULT_LOCATION')
+        if not default_location:
+            return "Error: No location provided and no DEFAULT_LOCATION set in .env file. Please specify a location or set DEFAULT_LOCATION."
+        location = default_location
+        logger.info(f"Using default location from .env: {location}")
+    
+    units = arguments.get('units', 'imperial')  # Default to imperial (Fahrenheit)
     detailed_view = arguments.get('detailed_view', True)
     include_forecast = arguments.get('forecast', False)
     
@@ -441,6 +458,12 @@ def execute(arguments: Dict[str, Any]) -> str:
    Longitude: {lon}
 
 🔗 Weather Icon: https://openweathermap.org/img/wn/{weather_icon}@2x.png
+
+🌐 Additional Information for AI:
+   Weather ID: {weather_id} (OpenWeatherMap code)
+   Country: {weather_data['sys']['country']}
+   Timezone: UTC{'+' if timezone_offset > 0 else ''}{timezone_offset//3600} hours
+   Data timestamp: {weather_data['dt']}
 """
         else:
             # Concise weather report with essential information
