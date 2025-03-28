@@ -171,6 +171,26 @@ class AIChat:
             self.logger.debug(f"Initializing Anthropic client with API key: {mask_key(api_key)}")
             self.client = Anthropic(api_key=api_key)
         
+        elif self.provider == 'custom':
+            # Handle custom provider from model_config
+            if 'custom_provider' not in model_config:
+                self.logger.error("Custom provider details not found in model config")
+                raise ValueError("Custom provider configuration is missing")
+            
+            custom_provider = model_config['custom_provider']
+            self.api_base = custom_provider.get('base_url', '').rstrip('/')
+            self.api_key = custom_provider.get('api_key', '')
+            self.header_auth = custom_provider.get('header_auth', True)
+            self.use_chat_completions_endpoint = custom_provider.get('use_chat_completions_endpoint', True)
+            
+            if not self.api_base:
+                self.logger.error("Custom provider API base URL not specified")
+                raise ValueError("Custom provider API base URL is required")
+            
+            self.logger.debug(f"Initializing custom provider client for {custom_provider.get('name')} with base URL: {self.api_base}")
+            if self.api_key:
+                self.logger.debug(f"Using API key: {mask_key(self.api_key)}")
+        
         else:  # openai
             if not OPENAI_AVAILABLE:
                 raise ImportError("OpenAI library not installed. Please install 'openai'.")
@@ -765,7 +785,104 @@ class AIChat:
                                     time.sleep(retry_delay)
                                     continue
 
-                else:  # OpenAI
+                elif self.provider == 'custom':
+                    # Format messages for OpenAI-compatible API
+                    formatted_messages = []
+                    for msg in messages:
+                        if isinstance(msg["content"], list):
+                            content_parts = []
+                            for part in msg["content"]:
+                                if part["type"] == "text":
+                                    content_parts.append({"type": "text", "text": part["text"]})
+                                elif part["type"] == "image_url":
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": part["image_url"]["url"]
+                                    })
+                            formatted_messages.append({"role": msg["role"], "content": content_parts})
+                        else:
+                            formatted_messages.append({"role": msg["role"], "content": msg["content"]})
+
+                    # Create request payload
+                    request_data = {
+                        "model": self.model_id.split('/')[-1],  # Extract just the model ID without the custom prefix
+                        "messages": formatted_messages,
+                        "temperature": 0.7,
+                        "stream": self.streaming_enabled
+                    }
+
+                    # Add max tokens if specified
+                    if self.max_tokens:
+                        request_data["max_tokens"] = self.max_tokens
+
+                    # Prepare headers based on API key setting
+                    headers = {"Content-Type": "application/json"}
+                    if self.api_key:
+                        if self.header_auth:
+                            headers["Authorization"] = f"Bearer {self.api_key}"
+                        else:
+                            # For APIs that use api_key in the request body
+                            request_data["api_key"] = self.api_key
+
+                    # Make API request
+                    data = None
+                    if self.streaming_enabled:
+                        response = requests.post(
+                            f"{self.api_base}{'/chat/completions' if self.use_chat_completions_endpoint else ''}",
+                            headers=headers,
+                            json=request_data,
+                            stream=True
+                        )
+                        response.raise_for_status()
+                        
+                        for line in response.iter_lines():
+                            if interrupted:
+                                break
+                            if line:
+                                line = line.decode('utf-8')
+                                if line.startswith('data: '):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
+                                            partial_response += chunk['choices'][0]['delta']['content']
+                                    except json.JSONDecodeError:
+                                        continue
+                    else:
+                        # Non-streaming mode
+                        response = requests.post(
+                            f"{self.api_base}{'/chat/completions' if self.use_chat_completions_endpoint else ''}",
+                            headers=headers,
+                            json=request_data
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        log_api_response("Custom Provider", request_data, data)
+                        
+                        if 'choices' in data and len(data['choices']) > 0:
+                            if 'message' in data['choices'][0]:
+                                partial_response = data['choices'][0]['message']['content'].strip()
+                            elif 'content' in data['choices'][0]:
+                                partial_response = data['choices'][0]['content'].strip()
+                            else:
+                                self.logger.warning(f"Unexpected response format: {data}")
+                                partial_response = "I apologize, but I received an unexpected response format from the server."
+                        else:
+                            self.logger.warning(f"No choices in response: {data}")
+                            partial_response = "I apologize, but I couldn't generate a proper response."
+
+                    # Try to get token usage if available
+                    if data and data.get('usage'):
+                        usage = data['usage']
+                        self.last_tokens_prompt = usage.get('prompt_tokens', 0)
+                        self.last_tokens_completion = usage.get('completion_tokens', 0)
+                        self.last_total_tokens = usage.get('total_tokens', 0)
+                        
+                        msg_index = len(self.messages) - 1
+                        setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                        setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                        setattr(self, f'last_total_tokens_{msg_index}', self.last_total_tokens)
+
+                else:  # Default provider (OpenAI)
                     request_data = {
                         "model": self.model_id,
                         "messages": messages,

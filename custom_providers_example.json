@@ -1,0 +1,20 @@
+{
+    "providers": [
+        {
+            "name": "Local Msty",
+            "base_url": "http://localhost:10001/v1",
+            "api_key": "",
+            "header_auth": false,
+            "use_chat_completions_endpoint": true,
+            "models": [
+                {
+                    "id": "qwen2.5:7b",
+                    "name": "Qwen local",
+                    "description": "Custom model",
+                    "context_window": 4096,
+                    "max_tokens": 2048
+                }
+            ]
+        }
+    ]
+}

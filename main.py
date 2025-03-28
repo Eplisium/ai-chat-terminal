@@ -9,7 +9,7 @@ from managers import (
     ToolsManager
 )
 from chat import AIChat, OpenRouterAPI, get_openrouter_headers
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 class AIChatApp:
     def __init__(self, logger, console):
@@ -19,6 +19,7 @@ class AIChatApp:
         
         # Initialize file paths
         self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
+        self.custom_providers_file = os.path.join(os.path.dirname(__file__), 'custom_providers.json')
         
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
@@ -32,6 +33,9 @@ class AIChatApp:
             models_path = os.path.join(os.path.dirname(__file__), 'models.json')
             with open(models_path, 'r') as f:
                 self.models_config = json.load(f)['models']
+            
+            # Load custom providers
+            self.custom_providers = self._load_custom_providers()
             
             # Load favorites
             self.favorites_path = os.path.join(os.path.dirname(__file__), 'favorites.json')
@@ -1479,6 +1483,476 @@ class AIChatApp:
                     self.chroma_manager = ChromaManager(self.logger, self.console)
                 self.chroma_manager.select_embedding_model()
 
+    def _load_custom_providers(self) -> List[Dict]:
+        """Load custom providers from file"""
+        try:
+            if os.path.exists(self.custom_providers_file):
+                with open(self.custom_providers_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)['providers']
+            else:
+                # Create default empty custom providers file
+                with open(self.custom_providers_file, 'w', encoding='utf-8') as f:
+                    json.dump({'providers': []}, f, indent=4)
+                return []
+        except Exception as e:
+            self.logger.error(f"Error loading custom providers: {e}")
+            return []
+
+    def _save_custom_providers(self, providers: List[Dict]) -> None:
+        """Save custom providers to file"""
+        try:
+            with open(self.custom_providers_file, 'w', encoding='utf-8') as f:
+                json.dump({'providers': providers}, f, indent=4)
+            # Refresh the in-memory list
+            self.custom_providers = providers
+        except Exception as e:
+            self.logger.error(f"Error saving custom providers: {e}")
+
+    def manage_custom_providers(self):
+        """Manage custom API providers"""
+        while True:
+            # Display current custom providers
+            if self.custom_providers:
+                self.console.print("\n[bold cyan]Current Custom Providers:[/bold cyan]")
+                for i, provider in enumerate(self.custom_providers):
+                    self.console.print(f"[cyan]{i+1}.[/cyan] [bold]{provider['name']}[/bold] - {provider['base_url']}")
+            else:
+                self.console.print("\n[yellow]No custom providers configured[/yellow]")
+            
+            # Management options
+            choices = [
+                ("Add New Provider", "add"),
+                ("Edit Provider", "edit"),
+                ("Remove Provider", "remove"),
+                ("Back", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage Custom Providers",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "add":
+                self._add_custom_provider()
+            elif answer['action'] == "edit" and self.custom_providers:
+                self._edit_custom_provider()
+            elif answer['action'] == "remove" and self.custom_providers:
+                self._remove_custom_provider()
+
+    def _add_custom_provider(self):
+        """Add a new custom API provider"""
+        try:
+            # Gather provider information
+            provider_questions = [
+                inquirer.Text('name',
+                    message="Provider name",
+                    validate=lambda _, x: bool(x.strip())
+                ),
+                inquirer.Text('base_url',
+                    message="API base URL (e.g., http://localhost:8000/v1)",
+                    validate=lambda _, x: bool(x.strip())
+                ),
+                inquirer.Text('api_key',
+                    message="API key (leave empty if not required)"
+                ),
+                inquirer.Confirm('header_auth',
+                    message="Use Authorization header for API key?",
+                    default=True
+                ),
+                inquirer.Confirm('use_chat_completions_endpoint',
+                    message="Append '/chat/completions' to base URL?",
+                    default=True
+                )
+            ]
+            
+            provider_answers = inquirer.prompt(provider_questions)
+            if not provider_answers:
+                return
+            
+            # Gather model information
+            models_list = []
+            while True:
+                self.console.print("\n[cyan]Add models for this provider[/cyan]")
+                model_questions = [
+                    inquirer.Text('id',
+                        message="Model ID (as expected by the API)",
+                        validate=lambda _, x: bool(x.strip())
+                    ),
+                    inquirer.Text('name',
+                        message="Display name",
+                        validate=lambda _, x: bool(x.strip())
+                    ),
+                    inquirer.Text('description',
+                        message="Description",
+                        default="Custom model"
+                    ),
+                    inquirer.Text('context_window',
+                        message="Context window size",
+                        validate=lambda _, x: x.isdigit() and int(x) > 0,
+                        default="4096"
+                    ),
+                    inquirer.Text('max_tokens',
+                        message="Max output tokens",
+                        validate=lambda _, x: x.isdigit() and int(x) > 0,
+                        default="2048"
+                    ),
+                    inquirer.Confirm('add_another',
+                        message="Add another model?",
+                        default=False
+                    )
+                ]
+                
+                model_answers = inquirer.prompt(model_questions)
+                if not model_answers:
+                    break
+                
+                models_list.append({
+                    "id": model_answers['id'],
+                    "name": model_answers['name'],
+                    "description": model_answers['description'],
+                    "context_window": int(model_answers['context_window']),
+                    "max_tokens": int(model_answers['max_tokens'])
+                })
+                
+                if not model_answers['add_another']:
+                    break
+            
+            # Create the provider entry
+            new_provider = {
+                "name": provider_answers['name'],
+                "base_url": provider_answers['base_url'].rstrip('/'),
+                "api_key": provider_answers['api_key'],
+                "header_auth": provider_answers['header_auth'],
+                "use_chat_completions_endpoint": provider_answers['use_chat_completions_endpoint'],
+                "models": models_list
+            }
+            
+            # Add to custom providers list
+            self.custom_providers.append(new_provider)
+            self._save_custom_providers(self.custom_providers)
+            
+            self.console.print(f"[green]Added custom provider: {new_provider['name']}[/green]")
+            
+        except Exception as e:
+            self.logger.error(f"Error adding custom provider: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error adding custom provider: {e}[/bold red]")
+
+    def _edit_custom_provider(self):
+        """Edit an existing custom API provider"""
+        try:
+            # Select provider to edit
+            provider_choices = [(p['name'], i) for i, p in enumerate(self.custom_providers)]
+            provider_choices.append(("Back", None))
+            
+            provider_question = [
+                inquirer.List('provider',
+                    message="Select provider to edit",
+                    choices=provider_choices,
+                    carousel=True
+                )
+            ]
+            
+            provider_answer = inquirer.prompt(provider_question)
+            if not provider_answer or provider_answer['provider'] is None:
+                return
+            
+            provider_index = provider_answer['provider']
+            current_provider = self.custom_providers[provider_index]
+            
+            # Edit provider settings
+            provider_questions = [
+                inquirer.Text('name',
+                    message="Provider name",
+                    default=current_provider['name'],
+                    validate=lambda _, x: bool(x.strip())
+                ),
+                inquirer.Text('base_url',
+                    message="API base URL",
+                    default=current_provider['base_url'],
+                    validate=lambda _, x: bool(x.strip())
+                ),
+                inquirer.Text('api_key',
+                    message="API key (leave empty if not required)",
+                    default=current_provider['api_key']
+                ),
+                inquirer.Confirm('header_auth',
+                    message="Use Authorization header for API key?",
+                    default=current_provider.get('header_auth', True)
+                ),
+                inquirer.Confirm('use_chat_completions_endpoint',
+                    message="Append '/chat/completions' to base URL?",
+                    default=current_provider.get('use_chat_completions_endpoint', True)
+                )
+            ]
+            
+            provider_answers = inquirer.prompt(provider_questions)
+            if not provider_answers:
+                return
+            
+            # Update provider information
+            self.custom_providers[provider_index].update({
+                "name": provider_answers['name'],
+                "base_url": provider_answers['base_url'].rstrip('/'),
+                "api_key": provider_answers['api_key'],
+                "header_auth": provider_answers['header_auth'],
+                "use_chat_completions_endpoint": provider_answers['use_chat_completions_endpoint']
+            })
+            
+            # Manage models
+            model_action_question = [
+                inquirer.List('action',
+                    message="Manage models for this provider",
+                    choices=[
+                        ("Keep existing models", "keep"),
+                        ("Edit existing models", "edit"),
+                        ("Replace all models", "replace")
+                    ],
+                    carousel=True
+                )
+            ]
+            
+            model_action_answer = inquirer.prompt(model_action_question)
+            if not model_action_answer:
+                return
+            
+            if model_action_answer['action'] == "edit":
+                self._edit_provider_models(provider_index)
+            elif model_action_answer['action'] == "replace":
+                # Clear models and add new ones
+                self.custom_providers[provider_index]['models'] = []
+                while True:
+                    self.console.print("\n[cyan]Add models for this provider[/cyan]")
+                    model_questions = [
+                        inquirer.Text('id',
+                            message="Model ID (as expected by the API)",
+                            validate=lambda _, x: bool(x.strip())
+                        ),
+                        inquirer.Text('name',
+                            message="Display name",
+                            validate=lambda _, x: bool(x.strip())
+                        ),
+                        inquirer.Text('description',
+                            message="Description",
+                            default="Custom model"
+                        ),
+                        inquirer.Text('context_window',
+                            message="Context window size",
+                            validate=lambda _, x: x.isdigit() and int(x) > 0,
+                            default="4096"
+                        ),
+                        inquirer.Text('max_tokens',
+                            message="Max output tokens",
+                            validate=lambda _, x: x.isdigit() and int(x) > 0,
+                            default="2048"
+                        )
+                    ]
+                    
+                    model_answers = inquirer.prompt(model_questions)
+                    if not model_answers:
+                        break
+                    
+                    self.custom_providers[provider_index]['models'].append({
+                        "id": model_answers['id'],
+                        "name": model_answers['name'],
+                        "description": model_answers['description'],
+                        "context_window": int(model_answers['context_window']),
+                        "max_tokens": int(model_answers['max_tokens'])
+                    })
+                    
+                    if not model_answers['add_another']:
+                        break
+            
+            # Save changes
+            self._save_custom_providers(self.custom_providers)
+            self.console.print(f"[green]Updated custom provider: {provider_answers['name']}[/green]")
+            
+        except Exception as e:
+            self.logger.error(f"Error editing custom provider: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error editing custom provider: {e}[/bold red]")
+
+    def _edit_provider_models(self, provider_index):
+        """Edit models for a specific provider"""
+        provider = self.custom_providers[provider_index]
+        models = provider['models']
+        
+        while True:
+            # Display current models
+            self.console.print(f"\n[bold cyan]Models for {provider['name']}:[/bold cyan]")
+            for i, model in enumerate(models):
+                self.console.print(f"[cyan]{i+1}.[/cyan] [bold]{model['name']}[/bold] ({model['id']})")
+            
+            model_choices = [
+                ("Add new model", "add"),
+                ("Edit model", "edit"),
+                ("Remove model", "remove"),
+                ("Done", "done")
+            ]
+            
+            model_action = inquirer.prompt([
+                inquirer.List('action',
+                    message="Model management",
+                    choices=model_choices,
+                    carousel=True
+                )
+            ])
+            
+            if not model_action or model_action['action'] == "done":
+                break
+            
+            if model_action['action'] == "add":
+                # Add new model
+                model_questions = [
+                    inquirer.Text('id',
+                        message="Model ID (as expected by the API)",
+                        validate=lambda _, x: bool(x.strip())
+                    ),
+                    inquirer.Text('name',
+                        message="Display name",
+                        validate=lambda _, x: bool(x.strip())
+                    ),
+                    inquirer.Text('description',
+                        message="Description",
+                        default="Custom model"
+                    ),
+                    inquirer.Text('context_window',
+                        message="Context window size",
+                        validate=lambda _, x: x.isdigit() and int(x) > 0,
+                        default="4096"
+                    ),
+                    inquirer.Text('max_tokens',
+                        message="Max output tokens",
+                        validate=lambda _, x: x.isdigit() and int(x) > 0,
+                        default="2048"
+                    )
+                ]
+                
+                model_answers = inquirer.prompt(model_questions)
+                if model_answers:
+                    models.append({
+                        "id": model_answers['id'],
+                        "name": model_answers['name'],
+                        "description": model_answers['description'],
+                        "context_window": int(model_answers['context_window']),
+                        "max_tokens": int(model_answers['max_tokens'])
+                    })
+            
+            elif model_action['action'] == "edit" and models:
+                # Select model to edit
+                model_choices = [(f"{m['name']} ({m['id']})", i) for i, m in enumerate(models)]
+                model_choices.append(("Back", None))
+                
+                model_select = inquirer.prompt([
+                    inquirer.List('model',
+                        message="Select model to edit",
+                        choices=model_choices,
+                        carousel=True
+                    )
+                ])
+                
+                if model_select and model_select['model'] is not None:
+                    model_index = model_select['model']
+                    current_model = models[model_index]
+                    
+                    # Edit model
+                    model_edit = inquirer.prompt([
+                        inquirer.Text('id',
+                            message="Model ID",
+                            default=current_model['id'],
+                            validate=lambda _, x: bool(x.strip())
+                        ),
+                        inquirer.Text('name',
+                            message="Display name",
+                            default=current_model['name'],
+                            validate=lambda _, x: bool(x.strip())
+                        ),
+                        inquirer.Text('description',
+                            message="Description",
+                            default=current_model['description']
+                        ),
+                        inquirer.Text('context_window',
+                            message="Context window size",
+                            default=str(current_model['context_window']),
+                            validate=lambda _, x: x.isdigit() and int(x) > 0
+                        ),
+                        inquirer.Text('max_tokens',
+                            message="Max output tokens",
+                            default=str(current_model['max_tokens']),
+                            validate=lambda _, x: x.isdigit() and int(x) > 0
+                        )
+                    ])
+                    
+                    if model_edit:
+                        models[model_index] = {
+                            "id": model_edit['id'],
+                            "name": model_edit['name'],
+                            "description": model_edit['description'],
+                            "context_window": int(model_edit['context_window']),
+                            "max_tokens": int(model_edit['max_tokens'])
+                        }
+            
+            elif model_action['action'] == "remove" and models:
+                # Select model to remove
+                model_choices = [(f"{m['name']} ({m['id']})", i) for i, m in enumerate(models)]
+                model_choices.append(("Back", None))
+                
+                model_select = inquirer.prompt([
+                    inquirer.List('model',
+                        message="Select model to remove",
+                        choices=model_choices,
+                        carousel=True
+                    )
+                ])
+                
+                if model_select and model_select['model'] is not None:
+                    model_index = model_select['model']
+                    confirm = inquirer.confirm(f"Remove model '{models[model_index]['name']}'?", default=False)
+                    if confirm:
+                        del models[model_index]
+        
+        # Save changes
+        self.custom_providers[provider_index]['models'] = models
+        self._save_custom_providers(self.custom_providers)
+
+    def _remove_custom_provider(self):
+        """Remove a custom API provider"""
+        try:
+            # Select provider to remove
+            provider_choices = [(p['name'], i) for i, p in enumerate(self.custom_providers)]
+            provider_choices.append(("Back", None))
+            
+            provider_question = [
+                inquirer.List('provider',
+                    message="Select provider to remove",
+                    choices=provider_choices,
+                    carousel=True
+                )
+            ]
+            
+            provider_answer = inquirer.prompt(provider_question)
+            if not provider_answer or provider_answer['provider'] is None:
+                return
+            
+            provider_index = provider_answer['provider']
+            provider_name = self.custom_providers[provider_index]['name']
+            
+            # Confirm removal
+            confirm = inquirer.confirm(f"Are you sure you want to remove '{provider_name}'?", default=False)
+            if confirm:
+                del self.custom_providers[provider_index]
+                self._save_custom_providers(self.custom_providers)
+                self.console.print(f"[green]Removed custom provider: {provider_name}[/green]")
+            
+        except Exception as e:
+            self.logger.error(f"Error removing custom provider: {e}", exc_info=True)
+            self.console.print(f"[bold red]Error removing custom provider: {e}[/bold red]")
+
     def display_main_menu(self):
         """Display the main menu for model selection"""
         self.logger.info("Displaying main menu")
@@ -1553,6 +2027,15 @@ class AIChatApp:
                     main_choices.append((f"{status} Anthropic Models 〈Claude & More〉{status_info}", "anthropic"))
                 else:
                     main_choices.append(("○ Anthropic Models 〈API Key Required〉", None))
+                
+                # Add Custom Providers section
+                if self.custom_providers:
+                    custom_count = len(self.custom_providers)
+                    model_count = sum(len(p.get('models', [])) for p in self.custom_providers)
+                    main_choices.append((f"🟢 Custom Providers  〈{custom_count} Providers, {model_count} Models〉", "custom"))
+                
+                # Add Custom Provider Management option
+                main_choices.append(("⚙️ Manage Custom APIs 〈Add/Edit Custom Providers〉", "manage_custom"))
                 
                 main_choices.extend([
                     ("═══ System Settings ═══", None),
@@ -1634,6 +2117,10 @@ class AIChatApp:
                     self.manage_settings()
                 elif answer['provider'] == "favorites":
                     self.manage_favorites()
+                elif answer['provider'] == "manage_custom":
+                    self.manage_custom_providers()
+                elif answer['provider'] == "custom":
+                    self._select_custom_provider_model()
                 elif answer['provider'] == "recent":
                     # Find the recent model
                     recent_model = next((m for m in self.models_config if m.get('recent', False)), None)
@@ -1707,12 +2194,75 @@ class AIChatApp:
                 self.logger.error(f"Menu error: {e}", exc_info=True)
                 self.console.print(f"[bold red]Error in menu: {e}[/bold red]")
                 continue
-    
+
+    def _select_custom_provider_model(self):
+        """Display menu for selecting models from custom providers"""
+        if not self.custom_providers:
+            self.console.print("[yellow]No custom providers configured[/yellow]")
+            return False
+
+        # Group by provider
+        provider_choices = [(p['name'], i) for i, p in enumerate(self.custom_providers)]
+        provider_choices.append(("Back", None))
+        
+        provider_question = [
+            inquirer.List('provider',
+                message="Select Custom Provider",
+                choices=provider_choices,
+                carousel=True
+            )
+        ]
+        
+        provider_answer = inquirer.prompt(provider_question)
+        if not provider_answer or provider_answer['provider'] is None:
+            return False
+        
+        provider_index = provider_answer['provider']
+        provider = self.custom_providers[provider_index]
+        
+        # Show models for selected provider
+        models = provider.get('models', [])
+        if not models:
+            self.console.print(f"[yellow]No models configured for {provider['name']}[/yellow]")
+            return False
+        
+        model_choices = []
+        for m in models:
+            # Check if model is in favorites
+            full_id = f"custom/{provider['name']}/{m['id']}"
+            is_favorite = any(f['id'] == full_id for f in self.favorites)
+            star = "★ " if is_favorite else ""
+            model_choices.append((
+                f"{star}{m['name']} - {m.get('description', 'No description')}",
+                m
+            ))
+        model_choices.append(("Back", None))
+        
+        model_question = [
+            inquirer.List('model',
+                message=f"Select {provider['name']} Model",
+                choices=model_choices,
+                carousel=True
+            )
+        ]
+        
+        model_answer = inquirer.prompt(model_question)
+        if model_answer and model_answer['model']:
+            # Create a complete model config with provider details
+            model_config = model_answer['model'].copy()
+            model_config['provider'] = 'custom'
+            model_config['custom_provider'] = provider
+            model_config['id'] = f"custom/{provider['name']}/{model_config['id']}"
+            
+            return self._handle_model_selection(model_config)
+        
+        return False
+        
     def _handle_model_selection(self, selected_model):
         """Handle the model selection and subsequent actions"""
         # Check if model is in favorites
         is_favorite = any(f['id'] == selected_model['id'] for f in self.favorites)
-        icon = "★" if is_favorite else "○"
+        icon = "★ " if is_favorite else ""
         
         # Display model description in a panel with enhanced styling
         self.console.print()  # Add spacing
@@ -1732,22 +2282,24 @@ class AIChatApp:
             ("Add to Favorites", "favorite"),
             ("Back", "back")
         ]
-        
+
         action_question = [
             inquirer.List('action',
-                message=f"Action for {selected_model['name']}",
+                message=f"Manage {selected_model['name']}",
                 choices=action_choices,
                 carousel=True
             ),
         ]
-        
+
         action_answer = inquirer.prompt(action_question)
-        if action_answer:
-            if action_answer['action'] == "chat":
-                if self.start_chat(selected_model):
-                    return True  # Signal to return to main menu
-            elif action_answer['action'] == "favorite":
-                self.add_to_favorites(selected_model)
+        if not action_answer:
+            return False
+
+        if action_answer['action'] == "chat":
+            if self.start_chat(selected_model):
+                return True  # Signal to return to main menu
+        elif action_answer['action'] == "favorite":
+            self.add_to_favorites(selected_model)
         return False
 
     def start_chat(self, model_config):
