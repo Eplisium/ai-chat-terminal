@@ -1980,6 +1980,13 @@ class AIChatApp:
                 # Get RAG status for main menu
                 agent_info = f" 〈{self._get_agent_status_display()}〉"
                 
+                # Check for other enabled AI features
+                streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+                tools_enabled = settings.get('tools', {}).get('enabled', False)
+                
+                # Build AI features display string for main menu
+                ai_features_info = self._get_ai_features_display()
+                
                 # Update main menu choices with RAG status
                 main_choices = [
                     ("═══ Select Your AI Provider ═══", None),
@@ -1994,7 +2001,7 @@ class AIChatApp:
                 # Add Favorites option
                 main_choices.append(("★ Favorite Models   〈Your preferred AI companions〉", "favorites"))
                 
-                # OpenAI status - Green when RAG is enabled
+                # OpenAI status
                 if openai_available:
                     if agent_enabled:
                         status = "🟢"  # Green for normal operation with RAG
@@ -2039,7 +2046,7 @@ class AIChatApp:
                 
                 main_choices.extend([
                     ("═══ System Settings ═══", None),
-                    (f"⚙️ AI Settings       〈Configure AI Behavior〉{agent_info}", "ai_settings"),
+                    (f"⚙️ AI Settings       〈Configure AI Behavior〉{ai_features_info}", "ai_settings"),
                     ("⚙️ Application Settings 〈Configure App Behavior〉", "settings"),
                     ("═══ Application ═══", None),
                     ("✖ Exit Application    〈Close ACT〉", "exit")
@@ -2527,6 +2534,37 @@ class AIChatApp:
             answer = inquirer.prompt(questions)
             if not answer or answer['action'] == "back":
                 break
+
+    def _get_ai_features_display(self):
+        """Get formatted AI features display string"""
+        settings = self._load_settings()
+        agent_enabled = settings.get('agent', {}).get('enabled', False)
+        streaming_enabled = settings.get('streaming', {}).get('enabled', False)
+        tools_enabled = settings.get('tools', {}).get('enabled', False)
+        
+        # Check if RAG is active (enabled + store selected)
+        agent_active = (
+            agent_enabled and 
+            self.chroma_manager and 
+            self.chroma_manager.vectorstore is not None and
+            self.chroma_manager.store_name is not None
+        )
+        
+        ai_features = []
+        if agent_enabled:
+            if agent_active:
+                ai_features.append("🟢 RAG (Active)")
+            else:
+                ai_features.append("🟡 RAG (Enabled)")
+        if streaming_enabled:
+            ai_features.append("🟢 Streaming")
+        if tools_enabled:
+            ai_features.append("🟢 Tools")
+        
+        if not ai_features:
+            return " 〈No features enabled〉"
+        
+        return f" 〈{', '.join(ai_features)}〉"
 
 def main():
     """Main application entry point"""
