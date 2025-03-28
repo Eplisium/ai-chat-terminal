@@ -89,6 +89,15 @@
   | text-embedding-3-small | 1536 | OpenAI | Cost-effective option |
   | text-embedding-3-large | 3072 | OpenAI | High-performance tasks |
   | text-embedding-ada-002 | 1536 | OpenAI | Legacy support |
+  | snowflake-arctic-embed-l-v2.0 | 1024 | Local (Snowflake) | High performance local model |
+  | nomic-embed-text-v2-moe | 768 | Local (Nomic AI) | Mixture of experts local model |
+
+- **Local Embeddings Support**
+  - No API key required for local models
+  - Automatic download and caching of models
+  - GPU acceleration when available (CUDA)
+  - Optimized for offline usage scenarios
+  - Lower latency for on-premise deployments
 
 - **Provider Support**
 
