@@ -56,3 +56,4 @@ guide.md
 tools/tools_config.json
 models.json
 custom_providers.json
+tools/apps_tool.py
