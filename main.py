@@ -2132,6 +2132,10 @@ class AIChatApp:
                     # Find the recent model
                     recent_model = next((m for m in self.models_config if m.get('recent', False)), None)
                     if recent_model:
+                        # Check if model is in favorites
+                        is_favorite = any(f['id'] == recent_model['id'] for f in self.favorites)
+                        star = "★ " if is_favorite else ""
+                        self.console.print(f"\n[cyan]Recent Model:[/cyan] {star}{recent_model['name']}")
                         if self._handle_model_selection(recent_model):
                             continue  # Return to main menu
                     else:
@@ -2284,11 +2288,13 @@ class AIChatApp:
         ))
         self.console.print()  # Add spacing
         
-        action_choices = [
-            ("Start Chat", "chat"),
-            ("Add to Favorites", "favorite"),
-            ("Back", "back")
-        ]
+        # Adjust action choices based on favorite status
+        action_choices = [("Start Chat", "chat")]
+        if is_favorite:
+            action_choices.append(("Remove from Favorites", "unfavorite"))
+        else:
+            action_choices.append(("Add to Favorites", "favorite"))
+        action_choices.append(("Back", "back"))
 
         action_question = [
             inquirer.List('action',
@@ -2307,6 +2313,9 @@ class AIChatApp:
                 return True  # Signal to return to main menu
         elif action_answer['action'] == "favorite":
             self.add_to_favorites(selected_model)
+        elif action_answer['action'] == "unfavorite":
+            self.remove_from_favorites(selected_model['id'])
+            self.console.print(f"[yellow]Removed {selected_model['name']} from favorites[/yellow]")
         return False
 
     def start_chat(self, model_config):
