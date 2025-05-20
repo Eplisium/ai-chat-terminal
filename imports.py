@@ -10,6 +10,7 @@ import dotenv
 import rich
 import threading
 import signal
+import pytz
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
