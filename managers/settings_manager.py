@@ -11,6 +11,10 @@ class SettingsManager:
     def _load_settings(self):
         """Load settings from file"""
         default_settings = {
+            'timezone': {
+                'preferred_timezone': None,  # Will use system timezone if None
+                'format': 'natural',  # 'natural' or 'technical'
+            },
             'codebase_search': {
                 'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.html', '.css', '.scss', '.sass', '.less', '.vue', '.sql', '.md', '.txt', '.json', '.yaml', '.yml', '.toml'],
                 'enabled_types': ['.py'],  # Default to only Python files
@@ -324,6 +328,108 @@ class SettingsManager:
                         else:
                             self.console.print("[yellow]No exclude patterns defined[/yellow]")
                         self.console.input("\nPress Enter to continue...")
+
+    def manage_timezone_settings(self):
+        """Manage timezone settings"""
+        while True:
+            try:
+                timezone_settings = self.get_setting('timezone', {
+                    'preferred_timezone': None,
+                    'format': 'natural'
+                })
+
+                current_timezone = timezone_settings.get('preferred_timezone', 'System Default')
+                current_format = timezone_settings.get('format', 'natural')
+
+                choices = [
+                    ("=== Timezone Settings ===", None),
+                    (f"Preferred Timezone: {current_timezone}", "timezone"),
+                    (f"Time Format: {'Natural' if current_format == 'natural' else 'Technical'}", "format"),
+                    ("Back to Settings Menu", "back")
+                ]
+
+                questions = [
+                    inquirer.List('action',
+                        message="Select setting to modify",
+                        choices=choices,
+                        carousel=True
+                    ),
+                ]
+
+                answer = inquirer.prompt(questions)
+                if not answer or answer['action'] == "back":
+                    break
+
+                if answer['action'] == "timezone":
+                    # Get common timezones for easier selection
+                    common_timezones = [
+                        "System Default",
+                        "America/New_York",
+                        "America/Los_Angeles",
+                        "America/Chicago",
+                        "Europe/London",
+                        "Europe/Paris",
+                        "Asia/Tokyo",
+                        "Asia/Shanghai",
+                        "Australia/Sydney",
+                        "Custom"
+                    ]
+
+                    tz_choices = [(tz, tz) for tz in common_timezones]
+                    tz_question = [
+                        inquirer.List('timezone',
+                            message="Select timezone",
+                            choices=tz_choices,
+                            carousel=True
+                        ),
+                    ]
+
+                    tz_answer = inquirer.prompt(tz_question)
+                    if tz_answer:
+                        selected_tz = tz_answer['timezone']
+                        
+                        if selected_tz == "Custom":
+                            custom_question = [
+                                inquirer.Text('custom_tz',
+                                    message="Enter timezone (e.g., America/New_York)",
+                                    validate=lambda _, x: x in pytz.all_timezones
+                                )
+                            ]
+                            custom_answer = inquirer.prompt(custom_question)
+                            if custom_answer:
+                                selected_tz = custom_answer['custom_tz']
+                            else:
+                                continue
+                        
+                        if selected_tz == "System Default":
+                            selected_tz = None
+                        
+                        self.update_setting('timezone', 'preferred_timezone', selected_tz)
+                        self.console.print("[green]Timezone updated successfully![/green]")
+
+                elif answer['action'] == "format":
+                    format_choices = [
+                        ("Natural (e.g., 'It's 12:52 AM in New York')", "natural"),
+                        ("Technical (e.g., 'Current time: 12:52 AM (America/New_York)')", "technical")
+                    ]
+
+                    format_question = [
+                        inquirer.List('format',
+                            message="Select time format",
+                            choices=format_choices,
+                            carousel=True
+                        ),
+                    ]
+
+                    format_answer = inquirer.prompt(format_question)
+                    if format_answer:
+                        self.update_setting('timezone', 'format', format_answer['format'])
+                        self.console.print("[green]Time format updated successfully![/green]")
+
+            except Exception as e:
+                self.logger.error(f"Error in timezone settings: {e}")
+                self.console.print(f"[bold red]Error: {e}[/bold red]")
+                continue
 
     def manage_chromadb_settings(self):
         """Manage ChromaDB settings"""
