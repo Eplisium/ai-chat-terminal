@@ -17,9 +17,12 @@ class AIChatApp:
         self.logger = logger
         self.console = console
         
-        # Initialize file paths
+        # Initialize file paths with detailed logging
+        self.logger.debug("Initializing file paths...")
         self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
         self.custom_providers_file = os.path.join(os.path.dirname(__file__), 'custom_providers.json')
+        self.logger.debug(f"Settings file path: {self.settings_file}")
+        self.logger.debug(f"Custom providers file path: {self.custom_providers_file}")
         
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
@@ -31,8 +34,15 @@ class AIChatApp:
         # Load models from JSON
         try:
             models_path = os.path.join(os.path.dirname(__file__), 'models.json')
-            with open(models_path, 'r') as f:
+            self.logger.debug(f"Loading models from: {models_path}")
+            
+            if not os.path.exists(models_path):
+                self.logger.error(f"models.json not found at: {models_path}")
+                raise FileNotFoundError(f"models.json not found at: {models_path}")
+                
+            with open(models_path, 'r', encoding='utf-8') as f:
                 self.models_config = json.load(f)['models']
+                self.logger.info(f"Successfully loaded {len(self.models_config)} models")
             
             # Load custom providers
             self.custom_providers = self._load_custom_providers()

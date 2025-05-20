@@ -42,6 +42,10 @@ class ChromaManager:
         self.vectorstore = None
         self.store_name = None
         self.current_directory = None  # Track current directory
+        
+        # Track resource initialization and cleanup
+        self._resources_initialized = False
+        self.logger.debug("ChromaManager initialized with no active resources")
         self.persist_directory = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'chroma_stores')
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
         self.embedding_model_name = None  # Track current embedding model name
@@ -615,6 +619,10 @@ class ChromaManager:
     def load_store(self, store_name: str) -> bool:
         """Load an existing ChromaDB store"""
         try:
+            # Ensure clean state before loading new store
+            if self._resources_initialized:
+                self.logger.debug("Cleaning up existing resources before loading new store")
+                self.unload_store()
             # Handle "None" or empty store name as special case to unload
             if not store_name or store_name.lower() == "none":
                 if self.vectorstore:
@@ -1129,7 +1137,11 @@ class ChromaManager:
     def unload_store(self) -> None:
         """Unload the current store and clean up resources"""
         try:
+            self.logger.debug("Starting store unload process...")
+            resources_cleaned = False
+            
             if self.vectorstore:
+                self.logger.debug(f"Cleaning up vectorstore for store: {self.store_name}")
                 try:
                     # Persist any pending changes
                     if hasattr(self.vectorstore, '_persist'):
