@@ -1,4 +1,5 @@
 from imports import *
+from utils import JSONCache
 
 class SystemInstructionsManager:
     """Class to manage system instructions for AI models"""
@@ -6,32 +7,31 @@ class SystemInstructionsManager:
         self.logger = logger
         self.console = console
         self.instructions_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'system_instructions.json')
+        self.json_cache = JSONCache()
         self.instructions = self._load_instructions()
 
     def _load_instructions(self):
-        """Load system instructions from file"""
+        """Load system instructions from file using cache"""
+        default_instructions = {
+            'instructions': [
+                {
+                    'name': 'Default',
+                    'content': 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.'
+                }
+            ],
+            'selected': 'Default'
+        }
         try:
-            if os.path.exists(self.instructions_file):
-                with open(self.instructions_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            return {
-                'instructions': [
-                    {
-                        'name': 'Default',
-                        'content': 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.'
-                    }
-                ],
-                'selected': 'Default'
-            }
+            return self.json_cache.load_json_cached(self.instructions_file, default_instructions)
         except Exception as e:
             self.logger.error(f"Error loading instructions: {e}")
-            return {'instructions': [], 'selected': None}
+            return default_instructions
 
     def _save_instructions(self):
-        """Save system instructions to file"""
+        """Save system instructions to file using cache"""
         try:
-            with open(self.instructions_file, 'w', encoding='utf-8') as f:
-                json.dump(self.instructions, f, indent=4)
+            if not self.json_cache.save_json_cached(self.instructions_file, self.instructions):
+                self.logger.error("Failed to save instructions using cache")
         except Exception as e:
             self.logger.error(f"Error saving instructions: {e}")
 
@@ -89,4 +89,4 @@ class SystemInstructionsManager:
 
     def get_current_name(self):
         """Get the name of the currently selected instruction"""
-        return self.instructions['selected'] 
+        return self.instructions['selected']    

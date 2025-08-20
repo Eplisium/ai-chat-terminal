@@ -17,6 +17,7 @@ import glob
 import datetime
 import time
 import uuid
+from utils import JSONCache
 
 class FileContent(BaseModel):
     """Model for file content"""
@@ -46,6 +47,7 @@ class ChromaManager:
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
         self.embedding_model_name = None  # Track current embedding model name
         self.model_cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'model_cache')
+        self.json_cache = JSONCache()
         
         # Create necessary directories
         os.makedirs(self.persist_directory, exist_ok=True)
@@ -317,46 +319,38 @@ class ChromaManager:
             return False
 
     def _load_settings(self) -> Dict:
-        """Load settings from file"""
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    
-                    # Ensure chromadb settings exist with defaults
-                    if 'chromadb' not in settings:
-                        settings['chromadb'] = {
-                            'embedding_model': 'text-embedding-3-small',
-                            'auto_add_files': True,
-                            'max_file_size_mb': 5,
-                            'search_results_limit': 10,  # Add default search limit
-                            'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
-                            'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
-                        }
-                        self._save_settings(settings)
-                    elif 'search_results_limit' not in settings['chromadb']:
-                        settings['chromadb']['search_results_limit'] = 10
-                        self._save_settings(settings)
-                    return settings
-            return {
-                'chromadb': {
-                    'embedding_model': 'text-embedding-3-small',
-                    'auto_add_files': True,
-                    'max_file_size_mb': 5,
-                    'search_results_limit': 10,
-                    'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
-                    'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
-                }
+        """Load settings from file using cache"""
+        default_settings = {
+            'chromadb': {
+                'embedding_model': 'text-embedding-3-small',
+                'auto_add_files': True,
+                'max_file_size_mb': 5,
+                'search_results_limit': 10,
+                'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
+                'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
             }
+        }
+        
+        try:
+            settings = self.json_cache.load_json_cached(self.settings_file, default_settings)
+            
+            # Ensure chromadb settings exist with defaults
+            if 'chromadb' not in settings:
+                settings['chromadb'] = default_settings['chromadb']
+                self._save_settings(settings)
+            elif 'search_results_limit' not in settings['chromadb']:
+                settings['chromadb']['search_results_limit'] = 10
+                self._save_settings(settings)
+            return settings
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
-            return {'chromadb': {'embedding_model': 'text-embedding-3-small', 'search_results_limit': 10}}
+            return default_settings
 
     def _save_settings(self, settings: Dict) -> None:
-        """Save settings to file"""
+        """Save settings to file using cache"""
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4)
+            if not self.json_cache.save_json_cached(self.settings_file, settings):
+                self.logger.error("Failed to save settings using cache")
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
 
@@ -1180,4 +1174,4 @@ class ChromaManager:
                 self.logger.info("No store currently loaded")
         except Exception as e:
             self.logger.error(f"Error unloading store: {e}")
-            self.console.print(f"[red]Error unloading store: {str(e)}[/red]") 
+            self.console.print(f"[red]Error unloading store: {str(e)}[/red]")  

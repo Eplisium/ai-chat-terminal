@@ -1,5 +1,5 @@
 from imports import *
-from utils import setup_logging
+from utils import setup_logging, JSONCache
 from managers import (
     SettingsManager,
     SystemInstructionsManager,
@@ -21,6 +21,9 @@ class AIChatApp:
         self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
         self.custom_providers_file = os.path.join(os.path.dirname(__file__), 'custom_providers.json')
         
+        # Initialize JSON cache
+        self.json_cache = JSONCache()
+        
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
         self.settings_manager = SettingsManager(logger, console)
@@ -31,19 +34,17 @@ class AIChatApp:
         # Load models from JSON
         try:
             models_path = os.path.join(os.path.dirname(__file__), 'models.json')
-            with open(models_path, 'r') as f:
-                self.models_config = json.load(f)['models']
+            models_data = self.json_cache.load_json_cached(models_path, {'models': []})
+            self.models_config = models_data['models']
             
             # Load custom providers
             self.custom_providers = self._load_custom_providers()
             
             # Load favorites
             self.favorites_path = os.path.join(os.path.dirname(__file__), 'favorites.json')
-            if os.path.exists(self.favorites_path):
-                with open(self.favorites_path, 'r') as f:
-                    self.favorites = json.load(f)['favorites']
-            else:
-                self.favorites = []
+            favorites_data = self.json_cache.load_json_cached(self.favorites_path, {'favorites': []})
+            self.favorites = favorites_data['favorites']
+            if not os.path.exists(self.favorites_path):
                 self.save_favorites()
             
             # Initialize OpenRouter API if key exists
@@ -75,9 +76,8 @@ class AIChatApp:
             raise ValueError("Invalid models.json configuration")
 
     def save_favorites(self):
-        """Save favorites to JSON file"""
-        with open(self.favorites_path, 'w') as f:
-            json.dump({'favorites': self.favorites}, f, indent=4)
+        """Save favorites to JSON file using cache"""
+        self.json_cache.save_json_cached(self.favorites_path, {'favorites': self.favorites})
 
     def add_to_favorites(self, model_config):
         """Add a model to favorites"""
@@ -111,12 +111,12 @@ class AIChatApp:
                 models_path = os.path.join(os.path.dirname(__file__), 'models.json')
                 if os.path.exists(models_path):
                     try:
-                        with open(models_path, 'r') as f:
-                            models = json.load(f)['models']
-                            for model in models:
-                                if model['id'] == model_id:
-                                    description = model.get('description')
-                                    break
+                        models_data = self.json_cache.load_json_cached(models_path, {'models': []})
+                        models = models_data['models']
+                        for model in models:
+                            if model['id'] == model_id:
+                                description = model.get('description')
+                                break
                     except:
                         pass
                 if not description:
@@ -147,12 +147,10 @@ class AIChatApp:
         self.save_favorites()
 
     def reload_favorites(self):
-        """Reload favorites from file"""
-        if os.path.exists(self.favorites_path):
-            with open(self.favorites_path, 'r') as f:
-                self.favorites = json.load(f)['favorites']
-        else:
-            self.favorites = []
+        """Reload favorites from file using cache"""
+        self.json_cache.invalidate_cache(self.favorites_path)
+        favorites_data = self.json_cache.load_json_cached(self.favorites_path, {'favorites': []})
+        self.favorites = favorites_data['favorites']
 
     def manage_favorites(self):
         """Display favorites management menu"""
@@ -1348,8 +1346,7 @@ class AIChatApp:
 
                         # Save updated config to models.json
                         models_path = os.path.join(os.path.dirname(__file__), 'models.json')
-                        with open(models_path, 'w') as f:
-                            json.dump({'models': self.models_config}, f, indent=4)
+                        self.json_cache.save_json_cached(models_path, {'models': self.models_config})
 
                         self.console.print(f"[green]Successfully updated context settings for {model['name']}[/green]")
                     except ValueError:
@@ -1484,25 +1481,20 @@ class AIChatApp:
                 self.chroma_manager.select_embedding_model()
 
     def _load_custom_providers(self) -> List[Dict]:
-        """Load custom providers from file"""
+        """Load custom providers from file using cache"""
         try:
-            if os.path.exists(self.custom_providers_file):
-                with open(self.custom_providers_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)['providers']
-            else:
-                # Create default empty custom providers file
-                with open(self.custom_providers_file, 'w', encoding='utf-8') as f:
-                    json.dump({'providers': []}, f, indent=4)
-                return []
+            providers_data = self.json_cache.load_json_cached(self.custom_providers_file, {'providers': []})
+            if not os.path.exists(self.custom_providers_file):
+                self.json_cache.save_json_cached(self.custom_providers_file, {'providers': []})
+            return providers_data['providers']
         except Exception as e:
             self.logger.error(f"Error loading custom providers: {e}")
             return []
 
     def _save_custom_providers(self, providers: List[Dict]) -> None:
-        """Save custom providers to file"""
+        """Save custom providers to file using cache"""
         try:
-            with open(self.custom_providers_file, 'w', encoding='utf-8') as f:
-                json.dump({'providers': providers}, f, indent=4)
+            self.json_cache.save_json_cached(self.custom_providers_file, {'providers': providers})
             # Refresh the in-memory list
             self.custom_providers = providers
         except Exception as e:
@@ -2359,8 +2351,7 @@ class AIChatApp:
             
             # Load the current models.json file
             models_path = os.path.join(os.path.dirname(__file__), 'models.json')
-            with open(models_path, 'r') as f:
-                models_data = json.load(f)
+            models_data = self.json_cache.load_json_cached(models_path, {'models': []})
             
             # Remove the recent flag from any existing models
             for model in models_data['models']:
@@ -2390,8 +2381,7 @@ class AIChatApp:
                 models_data['models'].append(formatted_model)
             
             # Save the updated models.json file
-            with open(models_path, 'w') as f:
-                json.dump(models_data, f, indent=4)
+            self.json_cache.save_json_cached(models_path, models_data)
             
             self.logger.info(f"Saved {recent_model['name']} as recent model")
             
@@ -2403,89 +2393,75 @@ class AIChatApp:
             self.console.print(f"[bold red]Error saving recent model: {e}[/bold red]")
 
     def _load_settings(self) -> Dict:
-        """Load settings from file"""
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    
-                    # Ensure agent settings exist with defaults
-                    if 'agent' not in settings:
-                        settings['agent'] = {
-                            'enabled': False
-                        }
-                    
-                    # Ensure streaming settings exist with defaults
-                    if 'streaming' not in settings:
-                        settings['streaming'] = {
-                            'enabled': False
-                        }
-                    
-                    # Load tools configuration from tools_config.json
-                    tools_config_file = os.path.join(os.path.dirname(__file__), 'tools', 'tools_config.json')
-                    if os.path.exists(tools_config_file):
-                        with open(tools_config_file, 'r', encoding='utf-8') as f:
-                            tools_config = json.load(f)
-                            if 'tools' not in settings:
-                                settings['tools'] = {
-                                    'enabled': False,
-                                    'available_tools': tools_config['tools']
-                                }
-                            else:
-                                # Update available tools while preserving enabled status
-                                available_tools = settings['tools'].get('available_tools', {})
-                                for tool_name, tool_info in tools_config['tools'].items():
-                                    if tool_name not in available_tools:
-                                        available_tools[tool_name] = tool_info
-                                    else:
-                                        # Update tool info but preserve enabled status
-                                        enabled_status = available_tools[tool_name].get('enabled', True)
-                                        available_tools[tool_name] = tool_info
-                                        available_tools[tool_name]['enabled'] = enabled_status
-                                
-                                # Remove tools that no longer exist
-                                for tool_name in list(available_tools.keys()):
-                                    if tool_name not in tools_config['tools']:
-                                        del available_tools[tool_name]
-                                
-                                settings['tools']['available_tools'] = available_tools
-                    else:
-                        # Default tools settings if tools_config.json doesn't exist
-                        if 'tools' not in settings:
-                            settings['tools'] = {
-                                'enabled': False,
-                                'available_tools': {}
-                            }
-                    
-                    self._save_settings(settings)
-                    return settings
-            
-            # Default settings if settings file doesn't exist
-            return {
-                'agent': {
-                    'enabled': False
-                },
-                'streaming': {
-                    'enabled': False
-                },
-                'tools': {
-                    'enabled': False,
-                    'available_tools': {}
-                }
+        """Load settings from file using cache"""
+        default_settings = {
+            'agent': {
+                'enabled': False
+            },
+            'streaming': {
+                'enabled': False
+            },
+            'tools': {
+                'enabled': False,
+                'available_tools': {}
             }
+        }
+        
+        try:
+            settings = self.json_cache.load_json_cached(self.settings_file, default_settings)
+            
+            # Ensure agent settings exist with defaults
+            if 'agent' not in settings:
+                settings['agent'] = default_settings['agent']
+            
+            # Ensure streaming settings exist with defaults
+            if 'streaming' not in settings:
+                settings['streaming'] = default_settings['streaming']
+            
+            # Load tools configuration from tools_config.json
+            tools_config_file = os.path.join(os.path.dirname(__file__), 'tools', 'tools_config.json')
+            if os.path.exists(tools_config_file):
+                tools_config_data = self.json_cache.load_json_cached(tools_config_file, {'tools': {}})
+                tools_config = tools_config_data
+                if 'tools' not in settings:
+                    settings['tools'] = {
+                        'enabled': False,
+                        'available_tools': tools_config['tools']
+                    }
+                else:
+                    # Update available tools while preserving enabled status
+                    available_tools = settings['tools'].get('available_tools', {})
+                    for tool_name, tool_info in tools_config['tools'].items():
+                        if tool_name not in available_tools:
+                            available_tools[tool_name] = tool_info
+                        else:
+                            # Update tool info but preserve enabled status
+                            enabled_status = available_tools[tool_name].get('enabled', True)
+                            available_tools[tool_name] = tool_info
+                            available_tools[tool_name]['enabled'] = enabled_status
+                    
+                    # Remove tools that no longer exist
+                    for tool_name in list(available_tools.keys()):
+                        if tool_name not in tools_config['tools']:
+                            del available_tools[tool_name]
+                    
+                    settings['tools']['available_tools'] = available_tools
+            else:
+                # Default tools settings if tools_config.json doesn't exist
+                if 'tools' not in settings:
+                    settings['tools'] = default_settings['tools']
+            
+            self._save_settings(settings)
+            return settings
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
-            return {
-                'agent': {'enabled': False},
-                'streaming': {'enabled': False},
-                'tools': {'enabled': False}
-            }
+            return default_settings
 
     def _save_settings(self, settings: Dict) -> None:
-        """Save settings to file"""
+        """Save settings to file using cache"""
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4)
+            if not self.json_cache.save_json_cached(self.settings_file, settings):
+                self.logger.error("Failed to save settings using cache")
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
 

@@ -1,4 +1,80 @@
 from imports import *
+import threading
+from typing import Dict, Any, Optional
+
+class JSONCache:
+    """Singleton class for caching JSON file operations with modification time tracking"""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(JSONCache, cls).__new__(cls)
+                    cls._instance._cache = {}
+                    cls._instance._mod_times = {}
+                    cls._instance._cache_lock = threading.Lock()
+        return cls._instance
+    
+    def __init__(self):
+        if not hasattr(self, '_cache'):
+            self._cache = {}
+            self._mod_times = {}
+            self._cache_lock = threading.Lock()
+    
+    def load_json_cached(self, file_path: str, default: Any = None) -> Any:
+        """Load JSON file with caching and modification time tracking"""
+        abs_path = os.path.abspath(file_path)
+        
+        with self._cache_lock:
+            try:
+                if not os.path.exists(abs_path):
+                    return default
+                
+                current_mod_time = os.path.getmtime(abs_path)
+                cached_mod_time = self._mod_times.get(abs_path)
+                
+                if abs_path in self._cache and cached_mod_time == current_mod_time:
+                    return self._cache[abs_path]
+                
+                with open(abs_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self._cache[abs_path] = data
+                    self._mod_times[abs_path] = current_mod_time
+                    return data
+                    
+            except Exception as e:
+                logging.getLogger("ACT").error(f"Error loading cached JSON {abs_path}: {e}")
+                return default
+    
+    def save_json_cached(self, file_path: str, data: Any, indent: int = 4) -> bool:
+        """Save JSON file and update cache"""
+        abs_path = os.path.abspath(file_path)
+        
+        with self._cache_lock:
+            try:
+                with open(abs_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=indent, ensure_ascii=False)
+                
+                self._cache[abs_path] = data
+                self._mod_times[abs_path] = os.path.getmtime(abs_path)
+                return True
+                
+            except Exception as e:
+                logging.getLogger("ACT").error(f"Error saving cached JSON {abs_path}: {e}")
+                return False
+    
+    def invalidate_cache(self, file_path: Optional[str] = None) -> None:
+        """Invalidate cache for specific file or all files"""
+        with self._cache_lock:
+            if file_path:
+                abs_path = os.path.abspath(file_path)
+                self._cache.pop(abs_path, None)
+                self._mod_times.pop(abs_path, None)
+            else:
+                self._cache.clear()
+                self._mod_times.clear()
 
 def setup_logging():
     """
@@ -259,8 +335,8 @@ def get_image_mime_type(image_path_or_url):
                 image_data = image_file.read()
         
         img = Image.open(BytesIO(image_data))
-        mime_type = f"image/{img.format.lower()}"
+        mime_type = f"image/{img.format.lower() if img.format else 'jpeg'}"
         return mime_type
     
     except Exception:
-        return "image/jpeg" 
+        return "image/jpeg"    

@@ -1,4 +1,5 @@
 from imports import *
+from utils import JSONCache
 
 class SettingsManager:
     """Class to manage application settings"""
@@ -6,10 +7,11 @@ class SettingsManager:
         self.logger = logger
         self.console = console
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        self.json_cache = JSONCache()
         self.settings = self._load_settings()
 
     def _load_settings(self):
-        """Load settings from file"""
+        """Load settings from file using cache"""
         default_settings = {
             'codebase_search': {
                 'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.html', '.css', '.scss', '.sass', '.less', '.vue', '.sql', '.md', '.txt', '.json', '.yaml', '.yml', '.toml'],
@@ -33,28 +35,28 @@ class SettingsManager:
         }
         
         try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    loaded_settings = json.load(f)
-                    # Merge loaded settings with defaults to ensure all keys exist
-                    for category, values in default_settings.items():
-                        if category not in loaded_settings:
-                            loaded_settings[category] = values
-                        elif isinstance(values, dict):
-                            for key, value in values.items():
-                                if key not in loaded_settings[category]:
-                                    loaded_settings[category][key] = value
-                    return loaded_settings
-            return default_settings
+            loaded_settings = self.json_cache.load_json_cached(self.settings_file, default_settings)
+            if loaded_settings == default_settings:
+                return default_settings
+            
+            # Merge loaded settings with defaults to ensure all keys exist
+            for category, values in default_settings.items():
+                if category not in loaded_settings:
+                    loaded_settings[category] = values
+                elif isinstance(values, dict):
+                    for key, value in values.items():
+                        if key not in loaded_settings[category]:
+                            loaded_settings[category][key] = value
+            return loaded_settings
         except Exception as e:
             self.logger.error(f"Error loading settings: {e}")
             return default_settings
 
     def _save_settings(self):
-        """Save settings to file"""
+        """Save settings to file using cache"""
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=4)
+            if not self.json_cache.save_json_cached(self.settings_file, self.settings):
+                self.logger.error("Failed to save settings using cache")
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
 
@@ -388,4 +390,4 @@ class SettingsManager:
                 if model_answer and model_answer['model']:
                     self.update_setting('chromadb', 'embedding_model', model_answer['model'])
                     self.console.print(f"[green]Embedding model updated to: {model_answer['model']}[/green]")
-                    self.console.print("[yellow]Note: You'll need to reload any open stores for the change to take effect[/yellow]") 
+                    self.console.print("[yellow]Note: You'll need to reload any open stores for the change to take effect[/yellow]")  
