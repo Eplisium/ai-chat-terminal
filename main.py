@@ -712,6 +712,9 @@ class AIChatApp:
             if not answer or answer['action'] == "back":
                 break
 
+            if answer['action'] is None:
+                continue
+
             if answer['action'] == "toggle":
                 # Toggle overall tools feature
                 tools_settings['enabled'] = not tools_enabled

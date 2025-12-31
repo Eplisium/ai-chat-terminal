@@ -8,6 +8,30 @@ import inspect
 class ToolsManager:
     """Class to manage AI tools and their execution"""
     
+    @staticmethod
+    def _get_short_description(docstring: str, tool_name: str) -> str:
+        """Extract only the first line/summary from a docstring"""
+        if not docstring:
+            return f"Execute {tool_name} tool"
+        
+        # Split by double newline (paragraph break) or 'Args:' section
+        lines = docstring.split('\n')
+        summary_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            # Stop at Args:, Returns:, or empty line after content
+            if stripped.lower().startswith(('args:', 'returns:', 'raises:', 'example:', 'note:')):
+                break
+            if stripped == '' and summary_lines:
+                break
+            if stripped:
+                summary_lines.append(stripped)
+        
+        if summary_lines:
+            return ' '.join(summary_lines)
+        return f"Execute {tool_name} tool"
+    
     def __init__(self, logger=None, settings_manager=None):
         self.logger = logger or logging.getLogger(__name__)
         self.settings_manager = settings_manager
@@ -47,8 +71,8 @@ class ToolsManager:
                 spec.loader.exec_module(module)
                 
                 if hasattr(module, 'execute'):
-                    # Get tool description from docstring
-                    description = inspect.getdoc(module.execute) or f"Execute {tool_name} tool"
+                    full_docstring = inspect.getdoc(module.execute)
+                    description = self._get_short_description(full_docstring, tool_name)
                     
                     # Get parameters from function signature
                     sig = inspect.signature(module.execute)
@@ -115,7 +139,8 @@ class ToolsManager:
                                 spec.loader.exec_module(module)
                                 
                                 if hasattr(module, 'execute'):
-                                    description = inspect.getdoc(module.execute) or f"Execute {tool_name} tool"
+                                    full_docstring = inspect.getdoc(module.execute)
+                                    description = self._get_short_description(full_docstring, tool_name)
                                     discovered_tools[tool_name] = {
                                         "enabled": True,
                                         "description": description,

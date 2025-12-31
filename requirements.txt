@@ -41,6 +41,8 @@ typing-extensions>=4.0.0  # for enhanced type hints
 # New dependencies
 sentence-transformers>=2.2.2
 psutil>=5.9.0
+wmi>=1.5.1  # for Windows system info (system_tool.py)
+GPUtil>=1.4.0  # for GPU info (system_tool.py)
 pytz>=2023.3
 Pygments>=2.17.2
 chardet>=5.2.0  # for file encoding detection
