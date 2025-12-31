@@ -2,17 +2,103 @@ from datetime import datetime
 import pytz
 import platform
 import re
+import os
 from typing import List, Tuple
 
+# Windows timezone name to pytz timezone mapping
+WINDOWS_TO_PYTZ = {
+    'Eastern Standard Time': 'America/New_York',
+    'Eastern Daylight Time': 'America/New_York',
+    'Central Standard Time': 'America/Chicago',
+    'Central Daylight Time': 'America/Chicago',
+    'Mountain Standard Time': 'America/Denver',
+    'Mountain Daylight Time': 'America/Denver',
+    'Pacific Standard Time': 'America/Los_Angeles',
+    'Pacific Daylight Time': 'America/Los_Angeles',
+    'Alaska Standard Time': 'America/Anchorage',
+    'Alaska Daylight Time': 'America/Anchorage',
+    'Hawaii-Aleutian Standard Time': 'Pacific/Honolulu',
+    'Atlantic Standard Time': 'America/Halifax',
+    'Atlantic Daylight Time': 'America/Halifax',
+    'Newfoundland Standard Time': 'America/St_Johns',
+    'Newfoundland Daylight Time': 'America/St_Johns',
+    'GMT Standard Time': 'Europe/London',
+    'British Summer Time': 'Europe/London',
+    'W. Europe Standard Time': 'Europe/Berlin',
+    'Central European Standard Time': 'Europe/Budapest',
+    'Romance Standard Time': 'Europe/Paris',
+    'Central Europe Standard Time': 'Europe/Prague',
+    'E. Europe Standard Time': 'Europe/Bucharest',
+    'FLE Standard Time': 'Europe/Kiev',
+    'GTB Standard Time': 'Europe/Athens',
+    'Russian Standard Time': 'Europe/Moscow',
+    'India Standard Time': 'Asia/Kolkata',
+    'China Standard Time': 'Asia/Shanghai',
+    'Tokyo Standard Time': 'Asia/Tokyo',
+    'Korea Standard Time': 'Asia/Seoul',
+    'AUS Eastern Standard Time': 'Australia/Sydney',
+    'AUS Central Standard Time': 'Australia/Adelaide',
+    'AUS Western Standard Time': 'Australia/Perth',
+    'New Zealand Standard Time': 'Pacific/Auckland',
+    'UTC': 'UTC',
+    'Coordinated Universal Time': 'UTC',
+}
+
 def get_system_timezone() -> str:
-    """Get the system timezone"""
+    """Get the system timezone as a pytz-compatible timezone name"""
     try:
+        # First check for DEFAULT_TIMEZONE environment variable
+        env_tz = os.getenv('DEFAULT_TIMEZONE')
+        if env_tz and is_valid_timezone(env_tz):
+            return env_tz
+        
         # For Unix-like systems
         if platform.system() != 'Windows':
-            with open('/etc/timezone', 'r') as f:
-                return f.read().strip()
-        # For Windows systems
-        return datetime.now().astimezone().tzname()
+            try:
+                with open('/etc/timezone', 'r') as f:
+                    tz = f.read().strip()
+                    if is_valid_timezone(tz):
+                        return tz
+            except:
+                pass
+        
+        # For Windows systems - get the timezone name and convert it
+        win_tz = datetime.now().astimezone().tzname()
+        
+        # Check if it's already a valid pytz timezone
+        if is_valid_timezone(win_tz):
+            return win_tz
+        
+        # Try to map Windows timezone name to pytz
+        if win_tz in WINDOWS_TO_PYTZ:
+            return WINDOWS_TO_PYTZ[win_tz]
+        
+        # Try to find a match by searching
+        for win_name, pytz_name in WINDOWS_TO_PYTZ.items():
+            if win_tz.lower() in win_name.lower() or win_name.lower() in win_tz.lower():
+                return pytz_name
+        
+        # Fallback: try to detect from UTC offset
+        local_offset = datetime.now().astimezone().utcoffset()
+        if local_offset:
+            offset_hours = local_offset.total_seconds() / 3600
+            # Map common offsets to timezones
+            offset_map = {
+                -5: 'America/New_York',
+                -6: 'America/Chicago',
+                -7: 'America/Denver',
+                -8: 'America/Los_Angeles',
+                -4: 'America/New_York',  # EDT
+                0: 'Europe/London',
+                1: 'Europe/Paris',
+                5.5: 'Asia/Kolkata',
+                8: 'Asia/Shanghai',
+                9: 'Asia/Tokyo',
+            }
+            if offset_hours in offset_map:
+                return offset_map[offset_hours]
+        
+        return 'UTC'
     except:
         return 'UTC'
 
