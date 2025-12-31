@@ -36,15 +36,24 @@ class StatsManager:
                     CREATE TABLE IF NOT EXISTS chat_stats (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         model_id TEXT NOT NULL,
+                        session_id INTEGER,
                         message_type TEXT NOT NULL,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                         token_count INTEGER,
                         prompt_tokens INTEGER,
                         completion_tokens INTEGER,
                         cost REAL DEFAULT 0,
-                        is_command BOOLEAN DEFAULT 0
+                        is_command BOOLEAN DEFAULT 0,
+                        FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
                     )
                 ''')
+                
+                # Add session_id column if it doesn't exist (for existing databases)
+                try:
+                    cursor.execute('ALTER TABLE chat_stats ADD COLUMN session_id INTEGER REFERENCES chat_sessions(id)')
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
                 
                 # Create chat sessions table
                 cursor.execute('''
@@ -107,21 +116,13 @@ class StatsManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Get total messages and cost for this session
+                # Get total messages and cost for this session using session_id
                 cursor.execute('''
-                    SELECT COUNT(*), COALESCE(SUM(CASE WHEN cost IS NOT NULL THEN cost ELSE 0 END), 0)
+                    SELECT 
+                        COUNT(CASE WHEN message_type = 'sent' AND is_command = 0 THEN 1 END),
+                        COALESCE(SUM(CASE WHEN message_type = 'received' AND is_command = 0 THEN cost ELSE 0 END), 0)
                     FROM chat_stats
-                    WHERE id > (
-                        SELECT COALESCE(MAX(id), 0)
-                        FROM chat_stats
-                        WHERE timestamp < (
-                            SELECT start_time
-                            FROM chat_sessions
-                            WHERE id = ?
-                        )
-                    )
-                    AND timestamp <= CURRENT_TIMESTAMP
-                    AND is_command = 0
+                    WHERE session_id = ?
                 ''', (session_id,))
                 total_messages, total_cost = cursor.fetchone()
                 
@@ -129,23 +130,23 @@ class StatsManager:
                 cursor.execute('''
                     UPDATE chat_sessions
                     SET end_time = CURRENT_TIMESTAMP,
-                        total_messages = ?,
-                        total_cost = ?
+                        total_messages = COALESCE(?, 0),
+                        total_cost = COALESCE(?, 0)
                     WHERE id = ?
                 ''', (total_messages, total_cost, session_id))
                 conn.commit()
         except Exception as e:
             self.logger.error(f"Error recording session end: {e}")
 
-    def record_chat(self, model_id, message_type, token_count=None, prompt_tokens=None, completion_tokens=None, cost=0, is_command=False):
+    def record_chat(self, model_id, message_type, token_count=None, prompt_tokens=None, completion_tokens=None, cost=0, is_command=False, session_id=None):
         """Record chat statistics"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO chat_stats (model_id, message_type, token_count, prompt_tokens, completion_tokens, cost, is_command)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (model_id, message_type, token_count, prompt_tokens, completion_tokens, cost, is_command))
+                    INSERT INTO chat_stats (model_id, session_id, message_type, token_count, prompt_tokens, completion_tokens, cost, is_command)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (model_id, session_id, message_type, token_count, prompt_tokens, completion_tokens, cost, is_command))
                 conn.commit()
         except Exception as e:
             self.logger.error(f"Error recording chat stats: {e}")
@@ -175,8 +176,6 @@ class StatsManager:
                             m.model_name,
                             m.provider,
                             s.id as session_id,
-                            s.start_time,
-                            s.end_time,
                             COUNT(DISTINCT CASE WHEN c.message_type = 'sent' AND c.is_command = 0 THEN c.id END) as session_msg_count,
                             COALESCE(SUM(CASE WHEN c.message_type = 'received' AND c.is_command = 0 THEN c.cost ELSE 0 END), 0) as session_cost,
                             COALESCE(SUM(CASE WHEN c.is_command = 0 THEN c.prompt_tokens ELSE 0 END), 0) as prompt_tokens,
@@ -186,10 +185,9 @@ class StatsManager:
                             SELECT DISTINCT model_id, model_name, provider
                             FROM model_usage
                         ) m ON s.model_id = m.model_id
-                        LEFT JOIN chat_stats c ON c.model_id = s.model_id 
-                            AND c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                        LEFT JOIN chat_stats c ON c.session_id = s.id
                             AND c.is_command = 0
-                        GROUP BY m.model_id, m.model_name, m.provider, s.id, s.start_time, s.end_time
+                        GROUP BY m.model_id, m.model_name, m.provider, s.id
                     ),
                     model_stats AS (
                         SELECT 
@@ -271,9 +269,8 @@ class StatsManager:
                         COALESCE(SUM(c.prompt_tokens), 0) as total_prompt_tokens,
                         COALESCE(SUM(c.completion_tokens), 0) as total_completion_tokens,
                         COALESCE(SUM(CASE WHEN c.message_type = 'received' THEN c.cost ELSE 0 END), 0) as total_cost,
-                        COUNT(DISTINCT s.id) as total_sessions
+                        COUNT(DISTINCT c.session_id) as total_sessions
                     FROM chat_stats c
-                    LEFT JOIN chat_sessions s ON c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
                     WHERE c.is_command = 0
                 ''')
                 totals = cursor.fetchone()
@@ -312,7 +309,7 @@ class StatsManager:
                     # Get message counts and token stats for this model's last session
                     cursor.execute('''
                         WITH last_session AS (
-                            SELECT id, start_time
+                            SELECT id
                             FROM chat_sessions
                             WHERE model_id = ?
                             ORDER BY start_time DESC
@@ -326,11 +323,10 @@ class StatsManager:
                             COALESCE(SUM(completion_tokens), 0) as completion_tokens,
                             COALESCE(SUM(cost), 0) as total_cost
                         FROM chat_stats
-                        WHERE model_id = ? 
+                        WHERE session_id = (SELECT id FROM last_session)
                         AND is_command = 0
-                        AND timestamp >= (SELECT start_time FROM last_session)
                         GROUP BY message_type
-                    ''', (model_id, model_id))
+                    ''', (model_id,))
                     stats = {}
                     for row in cursor.fetchall():
                         stats[row[0]] = {
@@ -391,21 +387,14 @@ class StatsManager:
                 cursor.execute('''
                     WITH provider_sessions AS (
                         SELECT 
-                            m.provider,
+                            s.provider,
                             s.id as session_id,
-                            s.start_time,
-                            s.end_time,
                             COUNT(DISTINCT CASE WHEN c.message_type = 'sent' AND c.is_command = 0 THEN c.id END) as session_msg_count,
                             COALESCE(SUM(CASE WHEN c.message_type = 'received' AND c.is_command = 0 THEN c.cost ELSE 0 END), 0) as session_cost
                         FROM chat_sessions s
-                        JOIN (
-                            SELECT DISTINCT model_id, provider
-                            FROM model_usage
-                        ) m ON s.model_id = m.model_id
-                        LEFT JOIN chat_stats c ON c.model_id = s.model_id 
-                            AND c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                        LEFT JOIN chat_stats c ON c.session_id = s.id
                             AND c.is_command = 0
-                        GROUP BY m.provider, s.id, s.start_time, s.end_time
+                        GROUP BY s.provider, s.id
                     ),
                     provider_stats AS (
                         SELECT 
@@ -455,7 +444,7 @@ class StatsManager:
                             COUNT(DISTINCT s.id) as session_count,
                             COALESCE(SUM(CASE WHEN c.message_type = 'received' AND c.is_command = 0 THEN c.cost ELSE 0 END), 0) as total_cost
                         FROM chat_sessions s
-                        LEFT JOIN chat_stats c ON c.timestamp BETWEEN s.start_time AND COALESCE(s.end_time, CURRENT_TIMESTAMP)
+                        LEFT JOIN chat_stats c ON c.session_id = s.id
                             AND c.is_command = 0
                         WHERE date(s.start_time) = ?
                     ''', (date,))

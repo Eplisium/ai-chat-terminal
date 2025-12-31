@@ -452,7 +452,7 @@ class AIChat:
             
             # Record sent message only when we're about to make the API call
             if self.stats_manager:
-                self.stats_manager.record_chat(self.model_id, "sent")
+                self.stats_manager.record_chat(self.model_id, "sent", session_id=self.session_id)
             
             start_time = time.time()
             thinking_message = self.console.status("")
@@ -655,7 +655,6 @@ class AIChat:
                                                 
                                                 # Make a new request to get the AI's natural response
                                                 request_data["messages"] = messages
-                                                request_data["stream"] = False
                                                 request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
                                                 request_data.pop("tool_choice", None)
                                                 
@@ -1081,16 +1080,8 @@ class AIChat:
                         token_count=token_count,
                         prompt_tokens=self.last_tokens_prompt,
                         completion_tokens=self.last_tokens_completion,
-                        cost=cost
-                    )
-                    
-                    self.stats_manager.record_model_usage(
-                        {
-                            'id': self.model_id,
-                            'name': self.model_name,
-                            'provider': self.provider
-                        },
-                        total_cost=cost
+                        cost=cost,
+                        session_id=self.session_id
                     )
             
             # Display and store the response
@@ -1434,7 +1425,7 @@ class AIChat:
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
                 "   - /end - End the chat session\n"
-                "❌ Type 'exit', 'quit', 'bye', or press Ctrl+C to end the session"
+                "❌ Type 'exit', 'quit', or press Ctrl+C to end the session"
             )
             
             self.console.print(
@@ -1520,7 +1511,7 @@ class AIChat:
                         
                         # Record command message
                         if self.stats_manager:
-                            self.stats_manager.record_chat(self.model_id, "sent", is_command=True)
+                            self.stats_manager.record_chat(self.model_id, "sent", is_command=True, session_id=self.session_id)
                         
                         if command in ['bye', 'exit', 'quit', 'cya', 'adios']:
                             self.logger.info(f"Chat session ended by user ({command} command)")
