@@ -24,12 +24,12 @@ einops>=0.7.0  # required by Nomic model
 python-docx>=0.8.11  # for DOCX files
 PyPDF2>=3.0.0       # for PDF files
 odfpy>=1.4.1        # for ODT files
-pyth>=0.7.0         # for RTF files (legacy support)
+pyth>=0.6.0         # for RTF files (legacy support)
 
 # Optional dependencies that are imported conditionally
 # These will be used if available but are not required for core functionality
 typing-extensions>=4.0.0  # for enhanced type hints
-pprint>=0.1            # for debug printing
+# pprint is a built-in Python module, no installation needed
 
 # Notes:
 # 1. Some packages like 'rtf' are imported conditionally and may need manual installation
