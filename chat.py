@@ -4,6 +4,186 @@ from managers.tools_manager import ToolsManager
 import re
 import glob
 
+
+class StreamingDisplay:
+    """Handles real-time streaming display with Rich Live"""
+    
+    def __init__(self, console, model_name, instruction_name, colors):
+        self.console = console
+        self.model_name = model_name
+        self.instruction_name = instruction_name
+        self.colors = colors
+        self.content = ""
+        self.reasoning_content = ""
+        self.tool_calls = []
+        self.current_tool = None
+        self.phase = "thinking"  # thinking, reasoning, tool_call, responding
+        self.start_time = time.time()
+        self.live = None
+        self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.frame_index = 0
+        
+    def _get_spinner(self):
+        """Get current spinner frame"""
+        frame = self.spinner_frames[self.frame_index % len(self.spinner_frames)]
+        self.frame_index += 1
+        return frame
+    
+    def _get_elapsed_time(self):
+        """Get formatted elapsed time"""
+        elapsed = time.time() - self.start_time
+        if elapsed < 60:
+            return f"{elapsed:.1f}s"
+        minutes = int(elapsed // 60)
+        seconds = elapsed % 60
+        return f"{minutes}m {seconds:.1f}s"
+    
+    def _build_display(self):
+        """Build the current display renderable"""
+        elements = []
+        
+        # Header with model info and elapsed time
+        elapsed = self._get_elapsed_time()
+        spinner = self._get_spinner()
+        
+        # Reasoning section (if present)
+        if self.reasoning_content:
+            reasoning_text = Text()
+            reasoning_text.append("💭 ", style="bold yellow")
+            reasoning_text.append("Thinking...\n", style="bold yellow")
+            # Show last 500 chars of reasoning to keep it compact
+            display_reasoning = self.reasoning_content
+            if len(display_reasoning) > 500:
+                display_reasoning = "..." + display_reasoning[-497:]
+            reasoning_text.append(display_reasoning, style="dim italic")
+            
+            reasoning_panel = Panel(
+                reasoning_text,
+                title="[bold yellow]🧠 Reasoning[/]",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+            elements.append(reasoning_panel)
+        
+        # Tool calls section (if any)
+        if self.tool_calls or self.current_tool:
+            tool_content = Text()
+            
+            # Show completed tool calls
+            for tool in self.tool_calls:
+                tool_content.append("✓ ", style="bold green")
+                tool_content.append(f"{tool['name']}", style="bold cyan")
+                if tool.get('result_preview'):
+                    tool_content.append(f" → {tool['result_preview'][:80]}...\n", style="dim")
+                else:
+                    tool_content.append("\n")
+            
+            # Show current tool being called
+            if self.current_tool:
+                tool_content.append(f"{spinner} ", style="bold yellow")
+                tool_content.append(f"{self.current_tool['name']}", style="bold cyan")
+                if self.current_tool.get('arguments'):
+                    args_preview = str(self.current_tool['arguments'])[:60]
+                    tool_content.append(f"({args_preview}...)", style="dim")
+                tool_content.append("\n")
+            
+            if tool_content.plain:
+                tool_panel = Panel(
+                    tool_content,
+                    title="[bold cyan]🔧 Tool Calls[/]",
+                    border_style="cyan",
+                    padding=(0, 1),
+                )
+                elements.append(tool_panel)
+        
+        # Main content section
+        if self.content:
+            # Show streaming content with cursor
+            display_content = self.content
+            if self.phase == "responding":
+                display_content += "▌"
+            
+            content_panel = Panel(
+                Markdown(display_content) if len(display_content) > 50 else Text(display_content),
+                title=f"[bold {self.colors['ai_name']}]{self.model_name}[/] [bold {self.colors['instruction_name']}][{self.instruction_name}][/]",
+                subtitle=f"[dim]{spinner} Streaming... ({elapsed})[/]",
+                border_style="bright_blue",
+                padding=(1, 2),
+            )
+            elements.append(content_panel)
+        elif self.phase == "thinking" and not self.reasoning_content and not self.tool_calls:
+            # Show initial thinking state
+            thinking_text = Text()
+            thinking_text.append(f"{spinner} ", style="bold yellow")
+            thinking_text.append(f"{self.model_name} is thinking... ", style="bold yellow")
+            thinking_text.append(f"({elapsed})", style="dim")
+            
+            thinking_panel = Panel(
+                thinking_text,
+                border_style="yellow",
+                padding=(0, 1),
+            )
+            elements.append(thinking_panel)
+        
+        if elements:
+            return Group(*elements)
+        return Text(f"{spinner} Waiting for response...", style="bold yellow")
+    
+    def start(self):
+        """Start the live display"""
+        self.live = Live(
+            self._build_display(),
+            console=self.console,
+            refresh_per_second=12,
+            transient=True,
+        )
+        self.live.start()
+    
+    def stop(self):
+        """Stop the live display"""
+        if self.live:
+            # Clear the display before stopping to prevent ghost frames
+            self.live.update("")
+            self.live.stop()
+            self.live = None
+    
+    def update(self):
+        """Update the live display"""
+        if self.live:
+            self.live.update(self._build_display())
+    
+    def add_content(self, text):
+        """Add content text"""
+        self.content += text
+        self.phase = "responding"
+        self.update()
+    
+    def add_reasoning(self, text):
+        """Add reasoning/thinking text"""
+        self.reasoning_content += text
+        self.phase = "reasoning"
+        self.update()
+    
+    def start_tool_call(self, name, arguments=None):
+        """Start a new tool call"""
+        self.current_tool = {"name": name, "arguments": arguments}
+        self.phase = "tool_call"
+        self.update()
+    
+    def complete_tool_call(self, result_preview=None):
+        """Complete the current tool call"""
+        if self.current_tool:
+            self.current_tool["result_preview"] = result_preview
+            self.tool_calls.append(self.current_tool)
+            self.current_tool = None
+        self.update()
+    
+    def set_phase(self, phase):
+        """Set the current phase"""
+        self.phase = phase
+        self.update()
+
+
 def get_openrouter_headers(api_key):
     """Get required headers for OpenRouter API"""
     return {
@@ -455,34 +635,49 @@ class AIChat:
                 self.stats_manager.record_chat(self.model_id, "sent", session_id=self.session_id)
             
             start_time = time.time()
-            thinking_message = self.console.status("")
-            thinking_message.start()
             
-            # Use a threading Event to control the timer
-            stop_timer = threading.Event()
-            
-            def update_thinking_message():
-                while not stop_timer.is_set():
-                    elapsed = time.time() - start_time
-                    minutes = int(elapsed // 60)
-                    seconds = elapsed % 60
-                    time_display = f"{seconds:.2f} secs"
-                    if minutes > 0:
-                        time_display = f"{minutes} min {seconds:.2f} secs"
-                    thinking_message.update(
-                        f"[bold yellow]{self.model_name} is thinking... ({time_display})[/bold yellow]"
-                    )
-                    time.sleep(0.1)  # Update every 100ms
-            
-            # Start the timer in a separate thread
-            timer_thread = threading.Thread(target=update_thinking_message)
-            timer_thread.daemon = True
-            timer_thread.start()
-
             # Variables for streaming response
             partial_response = ""
+            reasoning_content = ""
             interrupted = False
             original_handler = signal.getsignal(signal.SIGINT)
+            
+            # Initialize streaming display for visual streaming
+            streaming_display = None
+            if self.streaming_enabled:
+                colors = self._get_colors()
+                streaming_display = StreamingDisplay(
+                    self.console, 
+                    self.model_name, 
+                    self.instruction_name, 
+                    colors
+                )
+                streaming_display.start()
+            else:
+                # Use simple status for non-streaming
+                thinking_message = self.console.status("")
+                thinking_message.start()
+                
+                # Use a threading Event to control the timer
+                stop_timer = threading.Event()
+                
+                def update_thinking_message():
+                    while not stop_timer.is_set():
+                        elapsed = time.time() - start_time
+                        minutes = int(elapsed // 60)
+                        seconds = elapsed % 60
+                        time_display = f"{seconds:.2f} secs"
+                        if minutes > 0:
+                            time_display = f"{minutes} min {seconds:.2f} secs"
+                        thinking_message.update(
+                            f"[bold yellow]{self.model_name} is thinking... ({time_display})[/bold yellow]"
+                        )
+                        time.sleep(0.1)  # Update every 100ms
+                
+                # Start the timer in a separate thread
+                timer_thread = threading.Thread(target=update_thinking_message)
+                timer_thread.daemon = True
+                timer_thread.start()
 
             def signal_handler(signum, frame):
                 nonlocal interrupted
@@ -533,31 +728,50 @@ class AIChat:
                     
                     if self.streaming_enabled:
                         response = self.client.messages.create(**request_data)
+                        stream_usage = None  # Track usage from stream events
                         for chunk in response:
                             if interrupted:
                                 break
-                            if chunk.type == "content_block_delta":
-                                partial_response += chunk.delta.text or ""
+                            # Handle thinking/reasoning blocks (extended thinking)
+                            if hasattr(chunk, 'type'):
+                                if chunk.type == "content_block_start":
+                                    if hasattr(chunk, 'content_block') and hasattr(chunk.content_block, 'type'):
+                                        if chunk.content_block.type == "thinking":
+                                            streaming_display.set_phase("reasoning")
+                                        elif chunk.content_block.type == "text":
+                                            streaming_display.set_phase("responding")
+                                elif chunk.type == "content_block_delta":
+                                    if hasattr(chunk, 'delta'):
+                                        if hasattr(chunk.delta, 'type') and chunk.delta.type == "thinking_delta":
+                                            reasoning_content += chunk.delta.thinking or ""
+                                            streaming_display.add_reasoning(chunk.delta.thinking or "")
+                                        elif hasattr(chunk.delta, 'text'):
+                                            partial_response += chunk.delta.text or ""
+                                            streaming_display.add_content(chunk.delta.text or "")
+                                elif chunk.type == "message_start":
+                                    # Capture input tokens from message_start event
+                                    if hasattr(chunk, 'message') and hasattr(chunk.message, 'usage'):
+                                        stream_usage = {'input_tokens': chunk.message.usage.input_tokens, 'output_tokens': 0}
+                                elif chunk.type == "message_delta":
+                                    # Capture output tokens from message_delta event
+                                    if hasattr(chunk, 'usage') and hasattr(chunk.usage, 'output_tokens'):
+                                        if stream_usage:
+                                            stream_usage['output_tokens'] = chunk.usage.output_tokens
                         
-                        # Get token usage with a separate non-streaming request
-                        if not interrupted:
-                            request_data["stream"] = False
-                            final_response = self.client.messages.create(**request_data)
-                            log_api_response("Anthropic", request_data, final_response)
+                        # Get token usage from stream events (no duplicate request needed)
+                        if not interrupted and stream_usage:
+                            self.last_tokens_prompt = stream_usage['input_tokens']
+                            self.last_tokens_completion = stream_usage['output_tokens']
+                            self.last_total_cost = self._calculate_anthropic_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
                             
-                            if hasattr(final_response, 'usage'):
-                                self.last_tokens_prompt = final_response.usage.input_tokens
-                                self.last_tokens_completion = final_response.usage.output_tokens
-                                self.last_total_cost = self._calculate_anthropic_cost(
-                                    self.last_tokens_prompt,
-                                    self.last_tokens_completion,
-                                    self.model_id
-                                )
-                                
-                                msg_index = len(self.messages) - 1
-                                setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
-                                setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
-                                setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
                     else:
                         # Non-streaming mode
                         response = self.client.messages.create(**request_data)
@@ -610,6 +824,8 @@ class AIChat:
                             request_data["tool_choice"] = "auto"
 
                     data = None  # Initialize data variable
+                    generation_id = None  # Track generation ID for streaming
+                    
                     if self.streaming_enabled:
                         response = requests.post(
                             f"{self.api_base}/chat/completions",
@@ -619,59 +835,122 @@ class AIChat:
                         )
                         response.raise_for_status()
                         
+                        # Accumulate tool calls across chunks (they arrive piece by piece)
+                        accumulated_tool_calls = {}  # {index: {id, type, function: {name, arguments}}}
+                        finish_reason = None
+                        
                         for line in response.iter_lines():
                             if interrupted:
                                 break
                             if line:
                                 line = line.decode('utf-8')
                                 if line.startswith('data: '):
+                                    line_data = line[6:]
+                                    if line_data.strip() == '[DONE]':
+                                        continue
                                     try:
-                                        chunk = json.loads(line[6:])
-                                        if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
-                                            partial_response += chunk['choices'][0]['delta']['content']
-                                        elif chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('tool_calls'):
-                                            # Handle tool calls in streaming mode
-                                            tool_call = chunk['choices'][0]['delta']['tool_calls'][0]
-                                            if 'function' in tool_call:
-                                                # Add the assistant's initial message and tool call
-                                                initial_content = chunk['choices'][0]['delta'].get('content')
-                                                assistant_message = {
-                                                    "role": "assistant",
-                                                    "content": initial_content,
-                                                    "tool_calls": [tool_call]
-                                                }
-                                                messages.append(assistant_message)
-                                                
-                                                # Execute tool call and get result
-                                                result = self.tools_manager.execute_tool(tool_call)
-                                                
-                                                # Add tool result as a message
-                                                messages.append({
-                                                    "role": "tool",
-                                                    "name": tool_call['function']['name'],
-                                                    "tool_call_id": tool_call.get('id', ''),
-                                                    "content": result
-                                                })
-                                                
-                                                # Make a new request to get the AI's natural response
-                                                request_data["messages"] = messages
-                                                request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
-                                                request_data.pop("tool_choice", None)
-                                                
-                                                response = requests.post(
-                                                    f"{self.api_base}/chat/completions",
-                                                    headers=get_openrouter_headers(self.api_key),
-                                                    json=request_data
-                                                )
-                                                response.raise_for_status()
-                                                data = response.json()
-                                                
-                                                if 'choices' in data and len(data['choices']) > 0:
-                                                    partial_response = data['choices'][0]['message']['content'].strip()
-                                                else:
-                                                    partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + result
+                                        chunk = json.loads(line_data)
+                                        # Capture generation ID from first chunk
+                                        if chunk.get('id') and not generation_id:
+                                            generation_id = chunk['id']
+                                        
+                                        if chunk.get('choices'):
+                                            choice = chunk['choices'][0]
+                                            # Track finish reason
+                                            if choice.get('finish_reason'):
+                                                finish_reason = choice['finish_reason']
+                                            
+                                            delta = choice.get('delta', {})
+                                            
+                                            # Handle reasoning tokens (for models that support it)
+                                            if delta.get('reasoning') or delta.get('reasoning_content'):
+                                                reasoning_text = delta.get('reasoning') or delta.get('reasoning_content') or ''
+                                                reasoning_content += reasoning_text
+                                                streaming_display.add_reasoning(reasoning_text)
+                                            
+                                            # Accumulate content and display in real-time
+                                            if delta.get('content'):
+                                                partial_response += delta['content']
+                                                streaming_display.add_content(delta['content'])
+                                            
+                                            # Accumulate tool calls (they come in chunks)
+                                            if delta.get('tool_calls'):
+                                                for tc in delta['tool_calls']:
+                                                    idx = tc.get('index', 0)
+                                                    if idx not in accumulated_tool_calls:
+                                                        accumulated_tool_calls[idx] = {
+                                                            'id': '',
+                                                            'type': 'function',
+                                                            'function': {'name': '', 'arguments': ''}
+                                                        }
+                                                    
+                                                    if tc.get('id'):
+                                                        accumulated_tool_calls[idx]['id'] = tc['id']
+                                                    if tc.get('type'):
+                                                        accumulated_tool_calls[idx]['type'] = tc['type']
+                                                    if tc.get('function'):
+                                                        if tc['function'].get('name'):
+                                                            accumulated_tool_calls[idx]['function']['name'] = tc['function']['name']
+                                                            # Show tool call starting in real-time
+                                                            streaming_display.start_tool_call(tc['function']['name'])
+                                                        if tc['function'].get('arguments'):
+                                                            accumulated_tool_calls[idx]['function']['arguments'] += tc['function']['arguments']
                                     except json.JSONDecodeError:
                                         continue
+                        
+                        # After stream completes, handle accumulated tool calls
+                        if accumulated_tool_calls and finish_reason == 'tool_calls' and not interrupted:
+                            tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
+                            
+                            # Add the assistant's message with tool calls
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": partial_response if partial_response else None,
+                                "tool_calls": tool_calls_list
+                            }
+                            messages.append(assistant_message)
+                            
+                            # Execute each tool call and collect results
+                            tool_messages = []
+                            tool_results = []
+                            for tool_call in tool_calls_list:
+                                # Show tool execution in progress
+                                streaming_display.start_tool_call(
+                                    tool_call['function']['name'],
+                                    tool_call['function'].get('arguments', '')
+                                )
+                                result = self.tools_manager.execute_tool(tool_call)
+                                tool_results.append(result)
+                                # Mark tool as completed with preview
+                                streaming_display.complete_tool_call(result[:100] if result else None)
+                                tool_messages.append({
+                                    "role": "tool",
+                                    "name": tool_call['function']['name'],
+                                    "tool_call_id": tool_call.get('id', ''),
+                                    "content": result
+                                })
+                            
+                            messages.extend(tool_messages)
+                            
+                            # Make a follow-up request to get the AI's natural response
+                            request_data["messages"] = messages
+                            request_data["stream"] = False  # Non-streaming for follow-up
+                            request_data.pop("tools", None)
+                            request_data.pop("tool_choice", None)
+                            
+                            follow_up = requests.post(
+                                f"{self.api_base}/chat/completions",
+                                headers=get_openrouter_headers(self.api_key),
+                                json=request_data
+                            )
+                            follow_up.raise_for_status()
+                            data = follow_up.json()
+                            generation_id = data.get('id')
+                            
+                            if 'choices' in data and len(data['choices']) > 0:
+                                partial_response = data['choices'][0]['message']['content'].strip()
+                            else:
+                                partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + " ".join(tool_results)
                     else:
                         # Non-streaming mode
                         response = requests.post(
@@ -750,9 +1029,9 @@ class AIChat:
                         else:
                             partial_response = data['choices'][0]['message']['content'].strip()
 
-                    # Get token usage with a separate request
-                    if data and data.get('id'):
-                        generation_id = data['id']
+                    # Get token usage - use generation_id from streaming or data.id from non-streaming
+                    final_generation_id = generation_id or (data.get('id') if data else None)
+                    if final_generation_id and not interrupted:
                         time.sleep(0.5)
                         max_retries = 3
                         retry_delay = 0.5
@@ -760,7 +1039,7 @@ class AIChat:
                         for attempt in range(max_retries):
                             try:
                                 generation_response = requests.get(
-                                    f"{self.api_base}/generation?id={generation_id}",
+                                    f"{self.api_base}/generation?id={final_generation_id}",
                                     headers=get_openrouter_headers(self.api_key)
                                 )
                                 generation_data = generation_response.json()
@@ -825,6 +1104,7 @@ class AIChat:
 
                     # Make API request
                     data = None
+                    stream_usage = None  # Track usage from stream for custom providers
                     if self.streaming_enabled:
                         response = requests.post(
                             f"{self.api_base}{'/chat/completions' if self.use_chat_completions_endpoint else ''}",
@@ -840,10 +1120,21 @@ class AIChat:
                             if line:
                                 line = line.decode('utf-8')
                                 if line.startswith('data: '):
+                                    line_data = line[6:]
+                                    if line_data.strip() == '[DONE]':
+                                        continue
                                     try:
-                                        chunk = json.loads(line[6:])
+                                        chunk = json.loads(line_data)
+                                        # Try to capture usage from chunks (some providers include this)
+                                        if chunk.get('usage'):
+                                            stream_usage = {
+                                                'prompt_tokens': chunk['usage'].get('prompt_tokens', 0),
+                                                'completion_tokens': chunk['usage'].get('completion_tokens', 0)
+                                            }
                                         if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
-                                            partial_response += chunk['choices'][0]['delta']['content']
+                                            content = chunk['choices'][0]['delta']['content']
+                                            partial_response += content
+                                            streaming_display.add_content(content)
                                     except json.JSONDecodeError:
                                         continue
                     else:
@@ -869,12 +1160,22 @@ class AIChat:
                             self.logger.warning(f"No choices in response: {data}")
                             partial_response = "I apologize, but I couldn't generate a proper response."
 
-                    # Try to get token usage if available
+                    # Try to get token usage if available (from non-streaming or streaming)
                     if data and data.get('usage'):
                         usage = data['usage']
                         self.last_tokens_prompt = usage.get('prompt_tokens', 0)
                         self.last_tokens_completion = usage.get('completion_tokens', 0)
                         self.last_total_tokens = usage.get('total_tokens', 0)
+                        
+                        msg_index = len(self.messages) - 1
+                        setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                        setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                        setattr(self, f'last_total_tokens_{msg_index}', self.last_total_tokens)
+                    elif stream_usage and not interrupted:
+                        # Use usage captured from streaming chunks
+                        self.last_tokens_prompt = stream_usage['prompt_tokens']
+                        self.last_tokens_completion = stream_usage['completion_tokens']
+                        self.last_total_tokens = self.last_tokens_prompt + self.last_tokens_completion
                         
                         msg_index = len(self.messages) - 1
                         setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
@@ -889,6 +1190,10 @@ class AIChat:
                         "max_tokens": self.max_tokens if self.max_tokens else 4096,
                         "stream": self.streaming_enabled
                     }
+                    
+                    # Add stream_options for usage in streaming mode
+                    if self.streaming_enabled:
+                        request_data["stream_options"] = {"include_usage": True}
 
                     # Add tools configuration if enabled
                     if self.tools_enabled and self.tools_manager:
@@ -899,72 +1204,114 @@ class AIChat:
 
                     if self.streaming_enabled:
                         response = self.client.chat.completions.create(**request_data)
+                        
+                        # Accumulate tool calls across chunks (they arrive piece by piece)
+                        accumulated_tool_calls = {}  # {index: {id, type, function: {name, arguments}}}
+                        finish_reason = None
+                        stream_usage = None  # Track usage from stream
+                        
                         for chunk in response:
                             if interrupted:
                                 break
-                            if chunk.choices[0].delta.content:
-                                partial_response += chunk.choices[0].delta.content
-                            elif chunk.choices[0].delta.tool_calls:
-                                # Handle tool calls in streaming mode
-                                tool_call = chunk.choices[0].delta.tool_calls[0]
-                                if hasattr(tool_call, 'function'):  # Check if function exists
-                                    # Add the assistant's initial message and tool call
-                                    initial_content = chunk.choices[0].delta.content
-                                    assistant_message = {
-                                        "role": "assistant",
-                                        "content": initial_content,
-                                        "tool_calls": [
-                                            {
-                                                "id": tool_call.id,
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_call.function.name,
-                                                    "arguments": tool_call.function.arguments
-                                                }
-                                            }
-                                        ]
-                                    }
-                                    messages.append(assistant_message)
-                                    
-                                    # Execute tool call and get result
-                                    result = self.tools_manager.execute_tool({
-                                        "id": tool_call.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": tool_call.function.name,
-                                            "arguments": tool_call.function.arguments
-                                        }
-                                    })
-                                    
-                                    # Add tool result as a message
-                                    messages.append({
-                                        "role": "tool",
-                                        "name": tool_call.function.name,
-                                        "tool_call_id": tool_call.id,
-                                        "content": result
-                                    })
-                                    
-                                    # Make a second request to get the AI's natural response
-                                    request_data["messages"] = messages
-                                    request_data.pop("tools", None)  # Remove tools to avoid recursive tool calls
-                                    request_data.pop("tool_choice", None)
-                                    
-                                    response = self.client.chat.completions.create(**request_data)
-                                    for chunk in response:
-                                        if interrupted:
-                                            break
-                                        if chunk.choices[0].delta.content:
-                                            partial_response += chunk.choices[0].delta.content
-                        
-                        # Get token usage with a separate non-streaming request
-                        if not interrupted:
-                            request_data["stream"] = False
-                            final_response = self.client.chat.completions.create(**request_data)
-                            log_api_response("OpenAI", request_data, final_response)
                             
-                            if hasattr(final_response, 'usage'):
-                                self.last_tokens_prompt = final_response.usage.prompt_tokens
-                                self.last_tokens_completion = final_response.usage.completion_tokens
+                            # Capture usage from the final chunk (sent when include_usage is True)
+                            if hasattr(chunk, 'usage') and chunk.usage:
+                                stream_usage = {
+                                    'prompt_tokens': chunk.usage.prompt_tokens,
+                                    'completion_tokens': chunk.usage.completion_tokens
+                                }
+                            
+                            if not chunk.choices:
+                                continue
+                            
+                            choice = chunk.choices[0]
+                            # Track finish reason
+                            if choice.finish_reason:
+                                finish_reason = choice.finish_reason
+                            
+                            delta = choice.delta
+                            
+                            # Accumulate content and display in real-time
+                            if hasattr(delta, 'content') and delta.content:
+                                partial_response += delta.content
+                                streaming_display.add_content(delta.content)
+                            
+                            # Accumulate tool calls (they come in chunks)
+                            if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                                for tc in delta.tool_calls:
+                                    idx = tc.index if hasattr(tc, 'index') else 0
+                                    if idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[idx] = {
+                                            'id': '',
+                                            'type': 'function',
+                                            'function': {'name': '', 'arguments': ''}
+                                        }
+                                    
+                                    if hasattr(tc, 'id') and tc.id:
+                                        accumulated_tool_calls[idx]['id'] = tc.id
+                                    if hasattr(tc, 'type') and tc.type:
+                                        accumulated_tool_calls[idx]['type'] = tc.type
+                                    if hasattr(tc, 'function') and tc.function:
+                                        if hasattr(tc.function, 'name') and tc.function.name:
+                                            accumulated_tool_calls[idx]['function']['name'] = tc.function.name
+                                            # Show tool call starting in real-time
+                                            streaming_display.start_tool_call(tc.function.name)
+                                        if hasattr(tc.function, 'arguments') and tc.function.arguments:
+                                            accumulated_tool_calls[idx]['function']['arguments'] += tc.function.arguments
+                        
+                        # After stream completes, handle accumulated tool calls
+                        if accumulated_tool_calls and finish_reason == 'tool_calls' and not interrupted:
+                            tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
+                            
+                            # Add the assistant's message with tool calls
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": partial_response if partial_response else None,
+                                "tool_calls": tool_calls_list
+                            }
+                            messages.append(assistant_message)
+                            
+                            # Execute each tool call and collect results
+                            tool_messages = []
+                            tool_results = []
+                            for tool_call in tool_calls_list:
+                                # Show tool execution in progress
+                                streaming_display.start_tool_call(
+                                    tool_call['function']['name'],
+                                    tool_call['function'].get('arguments', '')
+                                )
+                                result = self.tools_manager.execute_tool(tool_call)
+                                tool_results.append(result)
+                                # Mark tool as completed with preview
+                                streaming_display.complete_tool_call(result[:100] if result else None)
+                                tool_messages.append({
+                                    "role": "tool",
+                                    "name": tool_call['function']['name'],
+                                    "tool_call_id": tool_call.get('id', ''),
+                                    "content": result
+                                })
+                            
+                            messages.extend(tool_messages)
+                            
+                            # Make a follow-up request to get the AI's natural response
+                            request_data["messages"] = messages
+                            request_data["stream"] = False  # Non-streaming for follow-up
+                            request_data.pop("tools", None)
+                            request_data.pop("tool_choice", None)
+                            request_data.pop("stream_options", None)
+                            
+                            follow_up = self.client.chat.completions.create(**request_data)
+                            log_api_response("OpenAI", request_data, follow_up)
+                            
+                            if follow_up.choices and len(follow_up.choices) > 0:
+                                partial_response = follow_up.choices[0].message.content.strip()
+                            else:
+                                partial_response = "I apologize, but I encountered an issue while processing the tool results. Let me try to summarize what I found: " + " ".join(tool_results)
+                            
+                            # Get token usage from follow-up response
+                            if hasattr(follow_up, 'usage'):
+                                self.last_tokens_prompt = follow_up.usage.prompt_tokens
+                                self.last_tokens_completion = follow_up.usage.completion_tokens
                                 self.last_total_cost = self._calculate_openai_cost(
                                     self.last_tokens_prompt,
                                     self.last_tokens_completion,
@@ -975,6 +1322,20 @@ class AIChat:
                                 setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
                                 setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
                                 setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
+                        elif not interrupted and stream_usage:
+                            # Get token usage from stream (no duplicate request needed)
+                            self.last_tokens_prompt = stream_usage['prompt_tokens']
+                            self.last_tokens_completion = stream_usage['completion_tokens']
+                            self.last_total_cost = self._calculate_openai_cost(
+                                self.last_tokens_prompt,
+                                self.last_tokens_completion,
+                                self.model_id
+                            )
+                            
+                            msg_index = len(self.messages) - 1
+                            setattr(self, f'last_total_cost_{msg_index}', self.last_total_cost)
+                            setattr(self, f'last_tokens_prompt_{msg_index}', self.last_tokens_prompt)
+                            setattr(self, f'last_tokens_completion_{msg_index}', self.last_tokens_completion)
                     else:
                         # Non-streaming mode
                         response = self.client.chat.completions.create(**request_data)
@@ -1056,15 +1417,18 @@ class AIChat:
                 # Restore original signal handler if streaming was enabled
                 if self.streaming_enabled:
                     signal.signal(signal.SIGINT, original_handler)
+                    # Stop the streaming display
+                    if streaming_display:
+                        streaming_display.stop()
+                else:
+                    # Stop the timer thread for non-streaming mode
+                    stop_timer.set()
+                    timer_thread.join(timeout=1.0)
+                    thinking_message.stop()
                 
                 # Calculate total response time
                 response_time = time.time() - start_time
                 self.last_response_time = response_time
-                
-                # Stop the timer thread
-                stop_timer.set()
-                timer_thread.join(timeout=1.0)
-                thinking_message.stop()
                 
                 if interrupted:
                     self.console.print("\n[yellow]Message interrupted by user[/yellow]")

@@ -11,10 +11,15 @@ import rich
 import threading
 import signal
 import pytz
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.logging import RichHandler
+from rich.live import Live
+from rich.text import Text
+from rich.spinner import Spinner
+from rich.table import Table
+from rich.box import ROUNDED, HEAVY
 import inquirer
 from inquirer import themes
 import requests
