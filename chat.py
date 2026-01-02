@@ -17,11 +17,13 @@ class StreamingDisplay:
         self.reasoning_content = ""
         self.tool_calls = []
         self.current_tool = None
-        self.phase = "thinking"  # thinking, reasoning, tool_call, responding
+        self.phase = "thinking"  # rag_search, thinking, reasoning, tool_call, responding
         self.start_time = time.time()
         self.live = None
         self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.frame_index = 0
+        self.rag_status = None  # Track RAG search status
+        self.rag_results_count = 0  # Number of RAG results found
         
     def _get_spinner(self):
         """Get current spinner frame"""
@@ -45,6 +47,27 @@ class StreamingDisplay:
         # Header with model info and elapsed time
         elapsed = self._get_elapsed_time()
         spinner = self._get_spinner()
+        
+        # RAG search section (if active or completed)
+        if self.rag_status:
+            rag_text = Text()
+            if self.rag_status == "searching":
+                rag_text.append(f"{spinner} ", style="bold magenta")
+                rag_text.append("Searching knowledge base...", style="bold magenta")
+            elif self.rag_status == "found":
+                rag_text.append("✓ ", style="bold green")
+                rag_text.append(f"Found {self.rag_results_count} relevant document(s)", style="green")
+            elif self.rag_status == "none":
+                rag_text.append("○ ", style="dim")
+                rag_text.append("No relevant context found", style="dim")
+            
+            rag_panel = Panel(
+                rag_text,
+                title="[bold magenta]📚 RAG Context[/]",
+                border_style="magenta",
+                padding=(0, 1),
+            )
+            elements.append(rag_panel)
         
         # Reasoning section (if present)
         if self.reasoning_content:
@@ -181,6 +204,22 @@ class StreamingDisplay:
     def set_phase(self, phase):
         """Set the current phase"""
         self.phase = phase
+        self.update()
+    
+    def start_rag_search(self):
+        """Start RAG search indicator"""
+        self.rag_status = "searching"
+        self.phase = "rag_search"
+        self.update()
+    
+    def complete_rag_search(self, results_count):
+        """Complete RAG search with results count"""
+        if results_count > 0:
+            self.rag_status = "found"
+            self.rag_results_count = results_count
+        else:
+            self.rag_status = "none"
+        self.phase = "thinking"
         self.update()
 
 
@@ -602,9 +641,22 @@ class AIChat:
             # Preprocess the message to handle file/dir/img references
             processed_input = self._preprocess_message(user_input)
 
-            # Process file context if available
+            # Process file context if available (with visual feedback)
             if self.chroma_manager and self.chroma_manager.vectorstore:
+                # Show RAG search indicator
+                rag_status = self.console.status("[bold magenta]📚 Searching knowledge base...[/bold magenta]")
+                rag_status.start()
+                
                 relevant_context = self.chroma_manager.search_context(user_input)
+                self._rag_results_count = len(relevant_context) if relevant_context else 0
+                
+                # Update and briefly show RAG results
+                rag_status.stop()
+                if relevant_context:
+                    self.console.print(f"[green]📚 Found {len(relevant_context)} relevant document(s)[/green]")
+                else:
+                    self.console.print("[dim]📚 No relevant context found[/dim]")
+                
                 if relevant_context:
                     context_message = {
                         "role": "system",

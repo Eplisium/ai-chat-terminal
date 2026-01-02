@@ -1138,7 +1138,6 @@ class ChromaManager:
         """Unload the current store and clean up resources"""
         try:
             self.logger.debug("Starting store unload process...")
-            resources_cleaned = False
             
             if self.vectorstore:
                 self.logger.debug(f"Cleaning up vectorstore for store: {self.store_name}")
@@ -1147,22 +1146,12 @@ class ChromaManager:
                     if hasattr(self.vectorstore, '_persist'):
                         self.vectorstore._persist()
                     
-                    # Get the underlying client if it exists
-                    if hasattr(self.vectorstore, '_client'):
-                        try:
-                            # Try to stop the system client
-                            if hasattr(self.vectorstore._client, '_system'):
-                                self.vectorstore._client._system.stop()
-                            # Clean up shared system client if using one
-                            from chromadb.api.client import SharedSystemClient
-                            if hasattr(self.vectorstore._client, '_identifier'):
-                                SharedSystemClient._identifer_to_system.pop(
-                                    self.vectorstore._client._identifier, None
-                                )
-                        except Exception as e:
-                            self.logger.warning(f"Non-critical error during client cleanup: {e}")
+                    # Note: Do NOT stop the underlying ChromaDB system client here.
+                    # The system is shared across the session, and stopping it will
+                    # cause "Could not connect to tenant" errors when loading a new store.
+                    # Just clear references and let garbage collection handle cleanup.
                     
-                    # Delete references to cleanup resources
+                    # Clear references
                     self.vectorstore = None
                     self.store_name = None
                     self.current_directory = None
@@ -1192,4 +1181,4 @@ class ChromaManager:
                 self.logger.info("No store currently loaded")
         except Exception as e:
             self.logger.error(f"Error unloading store: {e}")
-            self.console.print(f"[red]Error unloading store: {str(e)}[/red]") 
+            self.console.print(f"[red]Error unloading store: {str(e)}[/red]")
