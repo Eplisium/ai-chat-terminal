@@ -157,15 +157,52 @@ def log_api_response(provider, request_data, response_data, error=None):
     full_entry = "\n".join(log_entry)
     response_logger.info(full_entry)
 
-def sanitize_path(path):
-    """Sanitize a path string to be valid on all operating systems"""
+def sanitize_filename(filename):
+    """Sanitize a filename string to be valid on all operating systems.
+    Use this for creating safe filenames, not for path normalization."""
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
-        path = path.replace(char, '_')
-    path = path.strip('. ')
-    if not path:
-        path = 'unnamed'
-    return path
+        filename = filename.replace(char, '_')
+    filename = filename.strip('. ')
+    if not filename:
+        filename = 'unnamed'
+    return filename
+
+# Alias for backwards compatibility
+sanitize_path = sanitize_filename
+
+def normalize_path(path):
+    """Normalize and sanitize file/directory path.
+    Handles quotes, backslashes, drive letters, and path normalization."""
+    try:
+        # Remove any surrounding quotes (both single and double)
+        path = path.strip()
+        if (path.startswith('"') and path.endswith('"')) or \
+           (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        
+        # Handle Windows paths with escaped backslashes
+        if '\\\\' in path:
+            path = path.replace('\\\\', '\\')
+        
+        # Convert forward slashes to backslashes on Windows
+        if os.name == 'nt':
+            path = path.replace('/', '\\')
+        
+        # Normalize path separators for the current OS
+        path = os.path.normpath(path)
+        
+        # Make path absolute if relative
+        if not os.path.isabs(path):
+            path = os.path.join(os.getcwd(), path)
+        
+        # Ensure Windows drive letter is properly cased
+        if os.name == 'nt' and len(path) > 1 and path[1] == ':':
+            path = path[0].upper() + path[1:]
+        
+        return path
+    except Exception:
+        return path
 
 def read_document_content(file_path):
     """Read content from various document formats"""

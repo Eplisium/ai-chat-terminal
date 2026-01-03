@@ -8,7 +8,7 @@ from managers import (
     StatsManager,
     ToolsManager
 )
-from chat import AIChat, OpenRouterAPI, get_openrouter_headers
+from ai_chat import AIChat, OpenRouterAPI, get_openrouter_headers
 from typing import Dict, Any, List
 
 class AIChatApp:
@@ -2425,89 +2425,64 @@ class AIChatApp:
             self.console.print(f"[bold red]Error saving recent model: {e}[/bold red]")
 
     def _load_settings(self) -> Dict:
-        """Load settings from file"""
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    
-                    # Ensure agent settings exist with defaults
-                    if 'agent' not in settings:
-                        settings['agent'] = {
-                            'enabled': False
-                        }
-                    
-                    # Ensure streaming settings exist with defaults
-                    if 'streaming' not in settings:
-                        settings['streaming'] = {
-                            'enabled': False
-                        }
-                    
-                    # Load tools configuration from tools_config.json
-                    tools_config_file = os.path.join(os.path.dirname(__file__), 'tools', 'tools_config.json')
-                    if os.path.exists(tools_config_file):
-                        with open(tools_config_file, 'r', encoding='utf-8') as f:
-                            tools_config = json.load(f)
-                            if 'tools' not in settings:
-                                settings['tools'] = {
-                                    'enabled': False,
-                                    'available_tools': tools_config['tools']
-                                }
-                            else:
-                                # Update available tools while preserving enabled status
-                                available_tools = settings['tools'].get('available_tools', {})
-                                for tool_name, tool_info in tools_config['tools'].items():
-                                    if tool_name not in available_tools:
-                                        available_tools[tool_name] = tool_info
-                                    else:
-                                        # Update tool info but preserve enabled status
-                                        enabled_status = available_tools[tool_name].get('enabled', True)
-                                        available_tools[tool_name] = tool_info
-                                        available_tools[tool_name]['enabled'] = enabled_status
-                                
-                                # Remove tools that no longer exist
-                                for tool_name in list(available_tools.keys()):
-                                    if tool_name not in tools_config['tools']:
-                                        del available_tools[tool_name]
-                                
-                                settings['tools']['available_tools'] = available_tools
-                    else:
-                        # Default tools settings if tools_config.json doesn't exist
+        """Load settings using settings_manager with additional AI-specific defaults"""
+        # Use cached settings from settings_manager
+        settings = self.settings_manager.settings.copy()
+        
+        # Ensure agent settings exist with defaults
+        if 'agent' not in settings:
+            settings['agent'] = {'enabled': False}
+        
+        # Ensure streaming settings exist with defaults
+        if 'streaming' not in settings:
+            settings['streaming'] = {'enabled': False}
+        
+        # Load and merge tools configuration
+        if not hasattr(self, '_tools_config_loaded'):
+            tools_config_file = os.path.join(os.path.dirname(__file__), 'tools', 'tools_config.json')
+            if os.path.exists(tools_config_file):
+                try:
+                    with open(tools_config_file, 'r', encoding='utf-8') as f:
+                        tools_config = json.load(f)
                         if 'tools' not in settings:
                             settings['tools'] = {
                                 'enabled': False,
-                                'available_tools': {}
+                                'available_tools': tools_config['tools']
                             }
-                    
-                    self._save_settings(settings)
-                    return settings
+                        else:
+                            available_tools = settings['tools'].get('available_tools', {})
+                            for tool_name, tool_info in tools_config['tools'].items():
+                                if tool_name not in available_tools:
+                                    available_tools[tool_name] = tool_info
+                                else:
+                                    enabled_status = available_tools[tool_name].get('enabled', True)
+                                    available_tools[tool_name] = tool_info
+                                    available_tools[tool_name]['enabled'] = enabled_status
+                            
+                            for tool_name in list(available_tools.keys()):
+                                if tool_name not in tools_config['tools']:
+                                    del available_tools[tool_name]
+                            
+                            settings['tools']['available_tools'] = available_tools
+                except Exception as e:
+                    self.logger.error(f"Error loading tools config: {e}")
             
-            # Default settings if settings file doesn't exist
-            return {
-                'agent': {
-                    'enabled': False
-                },
-                'streaming': {
-                    'enabled': False
-                },
-                'tools': {
-                    'enabled': False,
-                    'available_tools': {}
-                }
-            }
-        except Exception as e:
-            self.logger.error(f"Error loading settings: {e}")
-            return {
-                'agent': {'enabled': False},
-                'streaming': {'enabled': False},
-                'tools': {'enabled': False}
-            }
+            if 'tools' not in settings:
+                settings['tools'] = {'enabled': False, 'available_tools': {}}
+            
+            self._tools_config_loaded = True
+            # Update settings_manager with merged settings
+            self.settings_manager.settings = settings
+            self.settings_manager._save_settings()
+        
+        return settings
 
     def _save_settings(self, settings: Dict) -> None:
-        """Save settings to file"""
+        """Save settings to file and update settings_manager cache"""
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4)
+            # Update settings_manager cache
+            self.settings_manager.settings = settings
+            self.settings_manager._save_settings()
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
 
