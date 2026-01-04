@@ -33,6 +33,10 @@ class SettingsManager:
                 'max_file_size_mb': 5,
                 'exclude_patterns': ['node_modules', 'venv', '.git', '__pycache__', 'build', 'dist', 'chroma_stores'],
                 'file_types': ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.md', '.txt']
+            },
+            'model_updates': {
+                'check_on_startup': False,
+                'last_check': None
             }
         }
         

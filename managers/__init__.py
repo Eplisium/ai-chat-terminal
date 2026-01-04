@@ -4,6 +4,7 @@ from .data_manager import DataManager
 from .chroma_manager import ChromaManager
 from .stats_manager import StatsManager
 from .tools_manager import ToolsManager
+from .models_manager import ModelsManager
 
 __all__ = [
     'SettingsManager',
@@ -11,5 +12,6 @@ __all__ = [
     'DataManager',
     'ChromaManager',
     'StatsManager',
-    'ToolsManager'
+    'ToolsManager',
+    'ModelsManager'
 ]

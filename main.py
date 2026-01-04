@@ -6,7 +6,8 @@ from managers import (
     DataManager,
     ChromaManager,
     StatsManager,
-    ToolsManager
+    ToolsManager,
+    ModelsManager
 )
 from ai_chat import AIChat, OpenRouterAPI, get_openrouter_headers
 from typing import Dict, Any, List
@@ -30,6 +31,7 @@ class AIChatApp:
         self.data_manager = DataManager(logger, console)
         self.chroma_manager = ChromaManager(logger, console)
         self.stats_manager = StatsManager(logger, console)
+        self.models_manager = ModelsManager(logger, console)
         
         # Load models from JSON
         try:
@@ -77,12 +79,39 @@ class AIChatApp:
                         self.logger.warning(f"Failed to load last store: {last_store}")
             
             self.logger.info(f"Loaded {len(self.models_config)} models from configuration")
+            
+            # Check for model updates on startup if enabled
+            self._check_startup_model_updates()
+            
         except FileNotFoundError:
             self.logger.error("models.json not found")
             raise FileNotFoundError("models.json configuration file is missing")
         except json.JSONDecodeError:
             self.logger.error("Invalid models.json format")
             raise ValueError("Invalid models.json configuration")
+
+    def _check_startup_model_updates(self):
+        """Check for model updates on startup if enabled"""
+        try:
+            update_settings = self.models_manager.get_update_settings()
+            if update_settings.get('check_on_startup', False):
+                self.logger.info("Checking for model updates on startup...")
+                summary = self.models_manager.check_for_updates(show_progress=False)
+                
+                # Only show notification if there are changes or errors
+                has_changes = summary['total_added'] > 0 or summary['total_updated'] > 0
+                has_errors = summary['openai_error'] or summary['anthropic_error']
+                
+                if has_changes or has_errors:
+                    self.models_manager.display_update_summary(summary)
+                    
+                    # Reload models if changes were made
+                    if has_changes:
+                        with open(os.path.join(os.path.dirname(__file__), 'models.json'), 'r', encoding='utf-8') as f:
+                            self.models_config = json.load(f)['models']
+                        self.logger.info(f"Reloaded {len(self.models_config)} models after update")
+        except Exception as e:
+            self.logger.error(f"Error checking for model updates on startup: {e}")
 
     def save_favorites(self):
         """Save favorites to JSON file"""
@@ -554,6 +583,7 @@ class AIChatApp:
                 ("=== Application Settings ===", None),
                 ("🔍 Appearance Settings", "appearance"),
                 ("🔍 Codebase Search Settings", "codebase"),
+                ("🔄 Model Updates", "model_updates"),
                 ("📊 ACT Statistics", "statistics"),
                 ("=== Data Management ===", None),
                 ("🗑️ Clear All Logs", "clear_logs"),
@@ -579,6 +609,8 @@ class AIChatApp:
                 self.settings_manager.manage_codebase_settings()
             elif answer['setting'] == "appearance":
                 self.settings_manager.manage_appearance_settings()
+            elif answer['setting'] == "model_updates":
+                self.models_manager.manage_model_updates()
             elif answer['setting'] == "statistics":
                 self.manage_statistics()
             elif answer['setting'] == "clear_logs":
