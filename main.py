@@ -3,6 +3,7 @@ from utils import setup_logging
 from managers import (
     SettingsManager,
     SystemInstructionsManager,
+    PromptTemplatesManager,
     DataManager,
     ChromaManager,
     StatsManager,
@@ -27,6 +28,7 @@ class AIChatApp:
         
         # Initialize managers
         self.instructions_manager = SystemInstructionsManager(logger, console)
+        self.prompt_templates_manager = PromptTemplatesManager(logger, console)
         self.settings_manager = SettingsManager(logger, console)
         self.data_manager = DataManager(logger, console)
         self.chroma_manager = ChromaManager(logger, console)
@@ -576,6 +578,145 @@ class AIChatApp:
                     )
                     self.console.input("\nPress Enter to continue...")
 
+    def manage_prompt_templates(self):
+        """Display favorite prompt templates management menu"""
+        def collect_multiline_prompt(title):
+            os.system('cls' if os.name == 'nt' else 'clear')
+            self.console.print(
+                Panel(
+                    f"[bold cyan]{title}[/bold cyan]\n"
+                    "• You can paste multiple lines of text\n"
+                    "• Press [bold]Enter[/bold] twice to start a new line\n"
+                    "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                    "• Type [bold]CANCEL[/bold] on a new line to cancel",
+                    title="[bold white]Prompt Input[/bold white]",
+                    border_style="cyan"
+                )
+            )
+
+            content_lines = []
+            try:
+                while True:
+                    line = input()
+                    if line.strip().upper() == 'END':
+                        break
+                    if line.strip().upper() == 'CANCEL':
+                        content_lines = []
+                        break
+                    content_lines.append(line)
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]Input cancelled[/yellow]")
+                return None
+
+            if not content_lines:
+                return None
+
+            return '\n'.join(content_lines)
+
+        def select_template():
+            templates = self.prompt_templates_manager.list_templates()
+            if not templates:
+                self.console.print("[yellow]No favorite prompts yet[/yellow]")
+                return None
+
+            template_choices = [(t['name'], t) for t in templates]
+            template_choices.append(("Back", None))
+
+            template_question = [
+                inquirer.List('template',
+                    message="Select a prompt template",
+                    choices=template_choices,
+                    carousel=True
+                ),
+            ]
+
+            template_answer = inquirer.prompt(template_question)
+            if template_answer and template_answer['template']:
+                return template_answer['template']
+            return None
+
+        while True:
+            choices = [
+                ("=== Favorite Prompts ===", None),
+                ("Add New Prompt", "add"),
+                ("View Prompt", "view"),
+                ("Edit Prompt", "edit"),
+                ("Remove Prompt", "remove"),
+                ("Back to Settings", "back")
+            ]
+
+            questions = [
+                inquirer.List('action',
+                    message="Manage Favorite Prompts",
+                    choices=choices,
+                    carousel=True
+                ),
+            ]
+
+            answer = inquirer.prompt(questions)
+            if not answer or answer['action'] == "back":
+                break
+
+            if answer['action'] == "add":
+                name_question = [
+                    inquirer.Text('name',
+                        message="Enter prompt name",
+                        validate=lambda _, x: len(x.strip()) > 0
+                    )
+                ]
+
+                name_answer = inquirer.prompt(name_question)
+                if not name_answer:
+                    continue
+
+                content = collect_multiline_prompt("Enter your favorite prompt below:")
+                if not content:
+                    self.console.print("[yellow]No content provided, prompt not saved[/yellow]")
+                    continue
+
+                success, msg = self.prompt_templates_manager.add_template(
+                    name_answer['name'],
+                    content
+                )
+                self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+
+            elif answer['action'] == "view":
+                selected = select_template()
+                if selected:
+                    self.console.print(
+                        Panel(
+                            selected['content'],
+                            title=f"[bold white]{selected['name']}[/bold white]",
+                            border_style="cyan"
+                        )
+                    )
+                    self.console.input("\nPress Enter to continue...")
+
+            elif answer['action'] == "edit":
+                selected = select_template()
+                if not selected:
+                    continue
+
+                content = collect_multiline_prompt(f"Editing: {selected['name']}")
+                if not content:
+                    self.console.print("[yellow]No content provided, prompt not updated[/yellow]")
+                    continue
+
+                success, msg = self.prompt_templates_manager.update_template(
+                    selected['name'],
+                    content
+                )
+                self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+
+            elif answer['action'] == "remove":
+                selected = select_template()
+                if not selected:
+                    continue
+
+                if inquirer.confirm(f"Remove prompt '{selected['name']}'?", default=False):
+                    success, msg = self.prompt_templates_manager.remove_template(selected['name'])
+                    self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+
     def manage_settings(self):
         """Display settings management menu"""
         while True:
@@ -583,6 +724,7 @@ class AIChatApp:
                 ("=== Application Settings ===", None),
                 ("🔍 Appearance Settings", "appearance"),
                 ("🔍 Codebase Search Settings", "codebase"),
+                ("📝 Favorite Prompts", "prompt_templates"),
                 ("🔄 Model Updates", "model_updates"),
                 ("📊 ACT Statistics", "statistics"),
                 ("=== Data Management ===", None),
@@ -609,6 +751,8 @@ class AIChatApp:
                 self.settings_manager.manage_codebase_settings()
             elif answer['setting'] == "appearance":
                 self.settings_manager.manage_appearance_settings()
+            elif answer['setting'] == "prompt_templates":
+                self.manage_prompt_templates()
             elif answer['setting'] == "model_updates":
                 self.models_manager.manage_model_updates()
             elif answer['setting'] == "statistics":
@@ -2392,6 +2536,7 @@ class AIChatApp:
                 self.console,
                 system_instruction,
                 self.settings_manager,
+                prompt_templates_manager=self.prompt_templates_manager,
                 chroma_manager=self.chroma_manager if enable_file_context else None,
                 stats_manager=self.stats_manager  # Pass stats_manager to AIChat
             )

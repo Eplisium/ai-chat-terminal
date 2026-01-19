@@ -135,11 +135,12 @@ class OpenRouterAPI:
         return dict(company_models)
 
 class AIChat:
-    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, chroma_manager=None, stats_manager=None):
+    def __init__(self, model_config, logger, console, system_instruction=None, settings_manager=None, prompt_templates_manager=None, chroma_manager=None, stats_manager=None):
         """Initialize AI Chat with specific model configuration"""
         self.logger = logger
         self.console = console
         self.settings_manager = settings_manager
+        self.prompt_templates_manager = prompt_templates_manager
         self.chroma_manager = chroma_manager
         self.stats_manager = stats_manager
         self.session_id = None  # Track current session ID
@@ -152,6 +153,7 @@ class AIChat:
         self.start_time = datetime.now()
         self.last_save_path = None  # Track last save location
         self.last_save_name = None  # Track last used custom name
+        self.last_user_message = None  # Track last user prompt
         
         # Initialize tools manager
         self.tools_manager = ToolsManager(logger=logger, settings_manager=settings_manager)
@@ -1536,6 +1538,10 @@ class AIChat:
                 "   - /info - Display chat session information\n"
                 "   - /fav - Add/remove current model to/from favorites\n"
                 "   - /save [name] - Save the chat history (optional custom name)\n"
+                "   - /prompt save [name] - Save last prompt as favorite\n"
+                "   - /prompt list - List favorite prompts\n"
+                "   - /prompt insert - Insert a favorite prompt\n"
+                "   - /prompt view - View a favorite prompt\n"
                 "   - /clear - Clear the screen and chat history\n"
                 "   - /insert - Insert multiline text (end with END on new line)\n"
                 "   - /end - End the chat session\n"
@@ -1692,11 +1698,20 @@ class AIChat:
                         elif command == '/fav':
                             self._display_fav()
                             continue
+                        elif command.startswith('/prompt'):
+                            handled, new_input = self._handle_prompt_command(command)
+                            if handled:
+                                if new_input:
+                                    user_input = new_input
+                                else:
+                                    continue
+                        
                         else:
                             self.console.print(f"[yellow]Unknown command: {command}[/yellow]")
                             continue
                     
                     # Process the message
+                    self.last_user_message = user_input
                     self.send_message(user_input)
                 
                 except KeyboardInterrupt:
@@ -1720,6 +1735,120 @@ class AIChat:
             self.console.print(f"[bold red]Fatal error: {e}[/bold red]")
             exit_chat("Exiting due to error")
 
+    def _handle_prompt_command(self, command):
+        """Handle favorite prompt template commands"""
+        if not self.prompt_templates_manager:
+            self.console.print("[yellow]Prompt templates manager not available[/yellow]")
+            return True, None
+
+        parts = command.split(maxsplit=2)
+        action = parts[1] if len(parts) > 1 else None
+        name_arg = parts[2].strip() if len(parts) > 2 else None
+
+        templates = self.prompt_templates_manager.list_templates()
+
+        def select_template(prompt_message):
+            if not templates:
+                self.console.print("[yellow]No favorite prompts yet[/yellow]")
+                return None
+            choices = [(t['name'], t) for t in templates]
+            choices.append(("Back", None))
+            answer = inquirer.prompt([
+                inquirer.List('template',
+                    message=prompt_message,
+                    choices=choices,
+                    carousel=True
+                )
+            ])
+            if answer and answer['template']:
+                return answer['template']
+            return None
+
+        def collect_multiline_prompt():
+            self.console.print(
+                Panel(
+                    "[bold cyan]Enter your prompt below:[/bold cyan]\n"
+                    "• You can paste multiple lines of text\n"
+                    "• Press [bold]Enter[/bold] twice to start a new line\n"
+                    "• Type [bold]END[/bold] on a new line and press Enter to finish\n"
+                    "• Type [bold]CANCEL[/bold] on a new line to cancel",
+                    title="[bold white]Prompt Input[/bold white]",
+                    border_style="cyan"
+                )
+            )
+
+            content_lines = []
+            try:
+                while True:
+                    line = input()
+                    if line.strip().upper() == 'END':
+                        break
+                    if line.strip().upper() == 'CANCEL':
+                        content_lines = []
+                        break
+                    content_lines.append(line)
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]Input cancelled[/yellow]")
+                return None
+
+            if not content_lines:
+                return None
+            return '\n'.join(content_lines)
+
+        if action == 'list':
+            if not templates:
+                self.console.print("[yellow]No favorite prompts yet[/yellow]")
+            else:
+                self.console.print("\n[bold cyan]Favorite Prompts:[/bold cyan]")
+                for template in templates:
+                    self.console.print(f"• {template['name']}")
+            return True, None
+
+        if action == 'view':
+            selected = select_template("Select a prompt to view")
+            if selected:
+                self.console.print(
+                    Panel(
+                        selected['content'],
+                        title=f"[bold white]{selected['name']}[/bold white]",
+                        border_style="cyan"
+                    )
+                )
+            return True, None
+
+        if action == 'insert':
+            selected = select_template("Select a prompt to insert")
+            if selected:
+                return True, selected['content']
+            return True, None
+
+        if action == 'save':
+            if not name_arg:
+                name_answer = inquirer.prompt([
+                    inquirer.Text('name',
+                        message="Enter prompt name",
+                        validate=lambda _, x: len(x.strip()) > 0
+                    )
+                ])
+                if not name_answer:
+                    return True, None
+                name_arg = name_answer['name']
+
+            content = self.last_user_message
+            if not content:
+                content = collect_multiline_prompt()
+
+            if not content:
+                self.console.print("[yellow]No content provided, prompt not saved[/yellow]")
+                return True, None
+
+            success, msg = self.prompt_templates_manager.add_template(name_arg, content)
+            self.console.print(f"[{'green' if success else 'red'}]{msg}[/]")
+            return True, None
+
+        self.console.print("[yellow]Usage: /prompt [save|list|insert|view] [name][/yellow]")
+        return True, None
+
     def _display_help(self):
         """Display detailed help information"""
         help_text = (
@@ -1729,6 +1858,11 @@ class AIChat:
             "  [bold yellow]/fav[/bold yellow]     - Add/remove current model to/from favorites\n"
             "  [bold yellow]/save[/bold yellow]    - Save chat history\n"
             "             Usage: /save [optional_name]\n"
+            "  [bold yellow]/prompt save[/bold yellow]   - Save last prompt as favorite\n"
+            "             Usage: /prompt save [optional_name]\n"
+            "  [bold yellow]/prompt list[/bold yellow]   - List favorite prompts\n"
+            "  [bold yellow]/prompt insert[/bold yellow] - Insert a favorite prompt\n"
+            "  [bold yellow]/prompt view[/bold yellow]   - View a favorite prompt\n"
             "  [bold yellow]/clear[/bold yellow]   - Clear screen and chat history\n"
             "  [bold yellow]/insert[/bold yellow]  - Enter multiline text\n"
             "             Type END to finish, CANCEL to abort\n"

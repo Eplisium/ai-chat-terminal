@@ -59,3 +59,4 @@ custom_providers.json
 tools/apps_tool.py
 
 .cursor/
+prompt_templates.json
